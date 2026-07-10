@@ -1,0 +1,5 @@
+_notes/
+.DS_Store
+*.out
+coverage.out
+coverage.txt
