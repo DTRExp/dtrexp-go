@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestParseErrors exercises every parse/validation error path not reached by
@@ -295,5 +296,33 @@ func TestStaticAnalysisExtra(t *testing.T) {
 		if w := e.Warnings(); len(w) > 0 {
 			t.Errorf("Parse(%q): expected no warnings, got %v", expr, w)
 		}
+	}
+}
+
+// An H/m-period cadence must stay exact across the full 1–9999 year domain.
+// time.Duration (int64 ns) saturates at ~±292 years; the evaluator therefore
+// works in int64 seconds. Anchor in year 1, instants in year 9999.
+func TestAbsoluteCadenceFarHorizon(t *testing.T) {
+	e, err := Parse("00010101/2H")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	anchor := time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC).Unix()
+	t1 := time.Date(9999, 12, 31, 0, 0, 0, 0, time.UTC)
+	t2 := t1.Add(time.Hour)
+	for _, tc := range []time.Time{t1, t2} {
+		want := (tc.Unix()-anchor)%7200 < 3600
+		got, cerr := e.Covers(tc, "UTC")
+		if cerr != nil {
+			t.Fatalf("covers: %v", cerr)
+		}
+		if got != want {
+			t.Errorf("Covers(%v) = %v, want %v", tc, got, want)
+		}
+	}
+	a, _ := e.Covers(t1, "UTC")
+	b, _ := e.Covers(t2, "UTC")
+	if a == b {
+		t.Errorf("adjacent hours must differ under a 2H/1H cadence: both %v", a)
 	}
 }

@@ -41,9 +41,9 @@ func TestDomainSpecUnknownDesignator(t *testing.T) {
 	}
 }
 
-func TestAbsoluteLenUnknownUnit(t *testing.T) {
-	if got := absoluteLen(1, 'Y'); got != 0 {
-		t.Errorf("absoluteLen(1, 'Y') = %v, want 0", got)
+func TestAbsoluteSecondsUnknownUnit(t *testing.T) {
+	if got := absoluteSeconds(1, 'Y'); got != 0 {
+		t.Errorf("absoluteSeconds(1, 'Y') = %v, want 0", got)
 	}
 }
 

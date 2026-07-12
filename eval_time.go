@@ -61,37 +61,30 @@ func (c *cadence) covers(t time.Time, loc *time.Location) bool {
 
 // coversAbsolute: H/m periods are absolute elapsed time from the resolved
 // anchor instant (spec §9.3); their durations are absolute as well.
+// Arithmetic is in int64 seconds, not time.Duration — a Duration is int64
+// nanoseconds and saturates at ~±292 years, well inside the 1–9999 year
+// domain. Periods, durations and anchors are all whole seconds, and the
+// windows are half-open on whole-second edges, so second math is exact.
 func (c *cadence) coversAbsolute(t time.Time, loc *time.Location) bool {
 	a := c.anchor
 	anchor := resolveCompatible(a.year, a.month, a.day, a.hour, a.minute, a.second, loc)
 	if t.Before(anchor) {
 		return false
 	}
-	period := absoluteLen(c.period, c.periodUnit)
-	duration := absoluteLen(c.duration, c.durationUnit)
-	k0 := int(t.Sub(anchor) / period)
-	for k := k0 - 1; k <= k0+1; k++ {
-		if k < 0 {
-			continue
-		}
-		start := anchor.Add(time.Duration(k) * period)
-		if !t.Before(start) && t.Before(start.Add(duration)) {
-			return true
-		}
-	}
-	return false
+	elapsed := t.Unix() - anchor.Unix()
+	return elapsed%absoluteSeconds(c.period, c.periodUnit) < absoluteSeconds(c.duration, c.durationUnit)
 }
 
-func absoluteLen(n int, unit byte) time.Duration {
+func absoluteSeconds(n int, unit byte) int64 {
 	switch unit {
 	case 'm':
-		return time.Duration(n) * time.Minute
+		return int64(n) * 60
 	case 'H':
-		return time.Duration(n) * time.Hour
+		return int64(n) * 3600
 	case 'D':
-		return time.Duration(n) * 24 * time.Hour
+		return int64(n) * 86400
 	case 'W':
-		return time.Duration(n) * 7 * 24 * time.Hour
+		return int64(n) * 604800
 	}
 	return 0
 }
