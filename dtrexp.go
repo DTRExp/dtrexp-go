@@ -19,7 +19,7 @@ import (
 
 // ParseError is a positioned syntax error: what went wrong and where. Pos is
 // the 0-based character offset of the offending input in the source string
-// (DTRExp expressions are ASCII, so byte and character offsets coincide).
+// (DTR expressions are ASCII, so byte and character offsets coincide).
 // Every error Parse returns for invalid source is a ParseError.
 type ParseError struct {
 	Pos int

@@ -27,17 +27,17 @@ import (
     dtrexp "github.com/DTRExp/dtrexp-go"
 )
 
-expr, err := dtrexp.Parse("T0900:1800 E1:5")    // business hours, Mon–Fri
+dtr, err := dtrexp.Parse("T0900:1800 E1:5")    // business hours, Mon–Fri
 if err != nil { /* a positioned ParseError */ }
 
-ok, err := expr.Covers(time.Now(), "Europe/Berlin")
+ok, err := dtr.Covers(time.Now(), "Europe/Berlin")
 // —> true on a weekday, 09:00–18:00 Berlin local time
 // The zone is an evaluation parameter, never part of the expression;
 // empty string or "UTC" means UTC.
 
 // Preloaded zone; cannot fail:
 berlin, _ := time.LoadLocation("Europe/Berlin")
-ok = expr.CoversIn(time.Now(), berlin)
+ok = dtr.CoversIn(time.Now(), berlin)
 ```
 
 Note that you parse **once** (at write/config time) and evaluate **many**; `Expression` values are immutable after `Parse` and safe for concurrent use. `Covers` is a single calendar-field extraction followed by integer comparisons — no occurrence iteration.
@@ -58,7 +58,7 @@ res.Warnings                       // [{Pos: 0, Message: "unsatisfiable …"}] �
 
 - `Parse(s)` returns the expression or a `ParseError` (*Pos* `int`, *Msg* `string`).
 - `Validate(s)` never fails; typo-shaped input comes back as data. Returns a `ValidationResult` with *Valid* `bool`, *Errors* (parsing stops at the first syntax error, so at most one) and *Warnings*.
-- Warnings are the spec's §9.1 unsatisfiability lint — expressions that parse but can never match. `expr.Warnings()` and `Validate(s).Warnings` carry the same content.
+- Warnings are the spec's [§9.1](https://github.com/DTRExp/dtrexp/blob/main/spec.md#91-the-existence-rule) unsatisfiability lint — expressions that parse but can never match. `dtr.Warnings()` and `Validate(s).Warnings` carry the same content.
 
 ## Conformance & quality
 
@@ -70,6 +70,7 @@ res.Warnings                       // [{Pos: 0, Message: "unsatisfiable …"}] �
 
 - [**dtrexp** (spec)][spec] — the DTRExp specification (grammar, semantics, conformance vectors) this package implements.
 - [**dtrexp-js**][js] — the reference implementation; adds `intersect`, `next`, `describe`, `toRRule` and canonicalization.
+- [**dtrexp-py**][py] · [**dtrexp-swift**][swift] · [**dtrexp-rs**][rs] · [**dtrexp-java**][java] — the other ports; same core interface.
 
 ## License
 
@@ -77,6 +78,10 @@ res.Warnings                       // [{Pos: 0, Message: "unsatisfiable …"}] �
 
 [spec]: https://github.com/DTRExp/dtrexp
 [js]: https://github.com/DTRExp/dtrexp-js
+[py]: https://github.com/DTRExp/dtrexp-py
+[swift]: https://github.com/DTRExp/dtrexp-swift
+[rs]: https://github.com/DTRExp/dtrexp-rs
+[java]: https://github.com/DTRExp/dtrexp-java
 [vectors]: https://github.com/DTRExp/dtrexp/blob/main/vectors.json
 [vectors-md]: https://github.com/DTRExp/dtrexp/blob/main/VECTORS.md
 [gremlins]: https://github.com/go-gremlins/gremlins
