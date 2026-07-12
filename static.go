@@ -13,32 +13,29 @@ import "fmt"
 func analyzeWarnings(e *Expression) []Warning {
 	var out []Warning
 	for i, b := range e.branches {
-		if reason, pos := branchUnsatisfiable(b); reason != "" {
+		if w := branchUnsatisfiable(b); w != nil {
 			if len(e.branches) > 1 {
-				reason = fmt.Sprintf("branch %d: %s", i+1, reason)
+				w.Message = fmt.Sprintf("branch %d: %s", i+1, w.Message)
 			}
-			out = append(out, Warning{Pos: pos, Message: reason})
+			out = append(out, *w)
 		}
 	}
 	return out
 }
 
-// branchUnsatisfiable returns the warning message and the source offset of the
-// offending selector, or ("", -1) when the branch is satisfiable.
-func branchUnsatisfiable(b *branch) (string, int) {
+// branchUnsatisfiable returns the warning positioned at the offending
+// selector, or nil when the branch is satisfiable.
+func branchUnsatisfiable(b *branch) *Warning {
 	for _, s := range b.selectors {
 		if hasOrdinal(s) || s.des == desY {
 			continue // ordinals need occurrence context; Y is unbounded
 		}
 		sizes := possibleSizes(b, s)
 		if !selectorSatisfiable(s, sizes) {
-			return fmt.Sprintf("unsatisfiable — selector %q matches nothing in its domain", string(s.des)), s.pos
+			return &Warning{Pos: s.pos, Message: fmt.Sprintf("unsatisfiable — selector %q matches nothing in its domain", string(s.des))}
 		}
 	}
-	if reason, pos := monthQuarterDisjoint(b); reason != "" {
-		return reason, pos
-	}
-	return "", -1
+	return monthQuarterDisjoint(b)
 }
 
 func hasOrdinal(s *selector) bool {
@@ -118,9 +115,9 @@ func matchesValue(s *selector, v, minVal, maxVal int) bool {
 }
 
 // monthQuarterDisjoint warns when co-present M and Q select disjoint month
-// sets; the warning is positioned at the M selector. It returns ("", -1) when
+// sets; the warning is positioned at the M selector. It returns nil when
 // there is nothing to warn about.
-func monthQuarterDisjoint(b *branch) (string, int) {
+func monthQuarterDisjoint(b *branch) *Warning {
 	var mSel, qSel *selector
 	for _, s := range b.selectors {
 		switch s.des {
@@ -131,7 +128,7 @@ func monthQuarterDisjoint(b *branch) (string, int) {
 		}
 	}
 	if mSel == nil || qSel == nil {
-		return "", -1
+		return nil
 	}
 	months := map[int]bool{}
 	for m := 1; m <= 12; m++ {
@@ -145,11 +142,11 @@ func monthQuarterDisjoint(b *branch) (string, int) {
 		}
 		for _, m := range []int{(q-1)*3 + 1, (q-1)*3 + 2, (q-1)*3 + 3} {
 			if months[m] {
-				return "", -1 // some month lies in a selected quarter
+				return nil // some month lies in a selected quarter
 			}
 		}
 	}
-	return "unsatisfiable — M and Q select disjoint months", mSel.pos
+	return &Warning{Pos: mSel.pos, Message: "unsatisfiable — M and Q select disjoint months"}
 }
 
 // singleValueOf returns the single positive value a designator selects, if the

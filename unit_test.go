@@ -16,6 +16,15 @@ func TestParseErrors(t *testing.T) {
 		want string // substring expected in the error
 		pos  int    // expected ParseError.Pos
 	}{
+		// boundary killers: index-0 markers, position arithmetic, duration floor
+		{"M!/3", "exclusion cannot carry a stride or ordinal", 2},
+		{"M!#2", "exclusion cannot carry a stride or ordinal", 2},
+		{"M/3", `invalid value ""`, 1},
+		{"T/2", "T takes no stride", 1},
+		{"T#1", "T takes no ordinal", 1},
+		{"T0900!1200", "T takes no exclusion", 5},
+		{"T0900:9900", "hour out of range in time value", 6},
+		{"H0/4/4", "stride duration must satisfy", 5},
 		// designators
 		{"a1", "unknown designator", 0},
 		{"z1", "unknown designator", 0},
@@ -324,5 +333,25 @@ func TestAbsoluteCadenceFarHorizon(t *testing.T) {
 	b, _ := e.Covers(t2, "UTC")
 	if a == b {
 		t.Errorf("adjacent hours must differ under a 2H/1H cadence: both %v", a)
+	}
+}
+
+// A stride duration of exactly 1 sits on the 1 <= duration < interval floor
+// and must parse (the spec's own lower bound).
+func TestStrideDurationFloor(t *testing.T) {
+	e, err := Parse("H0/4/1")
+	if err != nil {
+		t.Fatalf("H0/4/1 must parse: %v", err)
+	}
+	if len(e.Warnings()) != 0 {
+		t.Fatalf("H0/4/1 must be quiet, got %v", e.Warnings())
+	}
+	ok, _ := e.Covers(time.Date(2024, 1, 1, 4, 30, 0, 0, time.UTC), "UTC") // hour 4, inside
+	if !ok {
+		t.Error("hour 4 must be covered by H0/4/1")
+	}
+	ok, _ = e.Covers(time.Date(2024, 1, 1, 5, 30, 0, 0, time.UTC), "UTC") // hour 5, outside
+	if ok {
+		t.Error("hour 5 must not be covered by H0/4/1")
 	}
 }
