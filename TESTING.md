@@ -28,7 +28,7 @@ A handful of statements are defensive defaults unreachable through `Parse`/`Cove
 
 ## Mutation testing
 
-Latest full run: **484 mutants — 467 killed, 11 survivors (all equivalent, justified below), 5 reported "not covered" (tool blind spots, manually verified killed), plus timeouts counted as killed**. Efficacy as reported by gremlins (which counts the 11 equivalents as lived): ~97.7%; unjustified survivors: **0**.
+Latest full run (2026-07-14, after the validate/positions additions): **488 mutants — 468 killed, 11 survivors (all equivalent, justified below — the same eleven sites as the original pass), 5 reported "not covered" (tool blind spots, manually verified killed), 4 timeouts counted as killed**. Efficacy as reported by gremlins (which counts the 11 equivalents as lived): 97.70%; unjustified survivors: **0**.
 
 ### Justified equivalent survivors (11)
 
