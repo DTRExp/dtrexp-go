@@ -42,7 +42,7 @@ ok = dtr.CoversIn(time.Now(), berlin)
 
 Note that you parse **once** (at write/config time) and evaluate **many**; `Expression` values are immutable after `Parse` and safe for concurrent use. `Covers` is a single calendar-field extraction followed by integer comparisons; no occurrence iteration.
 
-## Errors and warnings
+## Errors and Warnings
 
 Both carry a **position**; the 0-based character offset into the source:
 
@@ -60,13 +60,13 @@ res.Warnings                       // [{Pos: 0, Message: "unsatisfiable …"}] �
 - `Validate(s)` never fails; typo-shaped input comes back as data. Returns a `ValidationResult` with *Valid* `bool`, *Errors* (parsing stops at the first syntax error, so at most one) and *Warnings*.
 - Warnings are the spec's [§9.1](https://github.com/DTRExp/dtrexp/blob/main/spec.md#91-the-existence-rule) unsatisfiability lint: expressions that parse but can never match. `dtr.Warnings()` and `Validate(s).Warnings` carry the same content.
 
-## Conformance & quality
+## Conformance & Quality
 
 - The test suite is driven by the shared [`vectors.json`][vectors] from the spec repo (draft 2.8): every coverage, rejection, warning and quiet vector, including the calendar traps (Feb 29 across 2000/2024/**2100**, `W53` existence, DST gap/overlap in `Europe/Berlin`). See [VECTORS.md][vectors-md] for how the suite works.
 - 100% statement coverage; mutation-tested with [gremlins][gremlins]. Commands and survivor justifications: [TESTING.md](TESTING.md).
 - Zero dependencies.
 
-## Related projects
+## Related Projects
 
 - [**dtrexp** (spec)][spec] — the DTRExp specification (grammar, semantics, conformance vectors) this package implements.
 - [**dtrexp-js**][js] — the reference implementation; adds `intersect`, `next`, `describe`, `toRRule` and canonicalization.

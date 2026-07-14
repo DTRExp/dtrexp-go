@@ -20,17 +20,17 @@ gremlins unleash --timeout-coefficient 30 --workers 4
 
 The `--timeout-coefficient 30` matters: the suite runs in ~0.4s, so gremlins' default per-mutant timeout is smaller than `go test` compilation time and every mutant falsely times out without it.
 
-## Coverage: 100% statements
+## Coverage: 100% Statements
 
 A handful of statements are defensive defaults unreachable through `Parse`/`Covers` (e.g. `daysInMonth` on month 0, `selectorInfo` on an unknown designator, `floorDiv` on negative input, `parseBranch` on a blank string that `parse` already rejects). They are pinned by direct white-box tests in `helpers_test.go` rather than removed, because they guard the internal helpers' own contracts.
 
 `helpers_test.go` also builds a synthetic TZif zone (three transitions within 48h, denser than any real IANA zone) to drive the `resolveCompatible` overlap arm where the ±24h offset samples are inverted; real zones cannot reach it, but a caller-supplied `*time.Location` can.
 
-## Mutation testing
+## Mutation Testing
 
 Latest full run (2026-07-14, after the validate/positions additions and the far-horizon estimate fix): **492 mutants: 472 killed, 11 survivors (all equivalent, justified below; the same eleven sites as the original pass), 5 reported "not covered" (tool blind spots, manually verified killed), 4 timeouts counted as killed**. Efficacy as reported by gremlins (which counts the 11 equivalents as lived): 97.72%; unjustified survivors: **0**.
 
-### Justified equivalent survivors (11)
+### Justified Equivalent Survivors (11)
 
 gremlins has no inline suppression mechanism, so equivalents are documented here. (One former row — the `eval_time.go` occurrence-probe loop — is gone: the loop itself was removed when cadence arithmetic moved to exact int64 seconds.) Each is a mutant no test can distinguish because the mutated comparison only differs on inputs the parser/validator has already excluded, or on loop iterations that provably never match.
 
@@ -47,7 +47,7 @@ gremlins has no inline suppression mechanism, so equivalents are documented here
 | CONDITIONALS_BOUNDARY `parse_value.go:340` | `startMs > endMs` → `>=` | Equal T-range endpoints are rejected two lines earlier ("covers nothing"), so equality is unreachable. |
 | CONDITIONALS_BOUNDARY `static.go:166` | `t.start.val >= 0` → `> 0` | `singleValueOf` is only queried for Y/Q/M, whose single values are ≥ 1 after parsing (0 is out of every one of those domains). |
 
-### "Not covered" mutants (5) — tool blind spots, manually verified killed
+### "Not Covered" Mutants (5) — Tool Blind Spots, Manually Verified Killed
 
 gremlins only mutates positions present in the coverage profile; `switch`/`case` condition expressions and `const` declarations never appear there, so it refuses to run these five even though the code is exercised. Each was applied by hand and the suite failed (killed):
 
