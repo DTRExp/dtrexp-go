@@ -161,10 +161,15 @@ func (c *cadence) occEnd(start time.Time) time.Time {
 
 func (c *cadence) estimateIndex(tn time.Time) int {
 	switch c.periodUnit {
+	// D/W count elapsed days in int64 seconds, not time.Sub — a Duration
+	// saturates at ~±292 years, and the 1–9999 year domain spans ~10,000:
+	// a clamped estimate strands the ±2 occurrence scan far below the
+	// true index. Both operands are whole-second naive UTC stamps, so
+	// second math is exact (same reasoning as coversAbsolute).
 	case 'D':
-		return int(tn.Sub(c.anchorNaive()).Hours()/24) / c.period
+		return int((tn.Unix()-c.anchorNaive().Unix())/86400) / c.period
 	case 'W':
-		return int(tn.Sub(c.anchorNaive()).Hours()/24) / (c.period * 7)
+		return int((tn.Unix()-c.anchorNaive().Unix())/86400) / (c.period * 7)
 	case 'M':
 		months := (tn.Year()-c.anchor.year)*12 + (int(tn.Month()) - c.anchor.month)
 		return months / c.period

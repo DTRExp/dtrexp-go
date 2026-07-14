@@ -194,3 +194,32 @@ func TestAPIPlumbing(t *testing.T) {
 		}
 	}
 }
+
+// TestCadenceFarHorizon pins D/W-period cadences beyond time.Duration's
+// ~±292.5-year ceiling: a clamped elapsed-days estimate strands the ±2
+// occurrence scan and turns covered instants into false negatives. The span
+// here is one full Gregorian cycle (400 years = exactly 146,097 days), which
+// crosses the clamp while keeping the occurrence index small enough that a
+// mutated scan bound cannot turn the test into a minutes-long loop — and the
+// probes sit at the very end of the 1–9999 year domain.
+func TestCadenceFarHorizon(t *testing.T) {
+	odd := mustInstant(t, "9999-01-01T00:00:00Z")  // day offset 146,097 (odd)
+	even := mustInstant(t, "9999-01-02T00:00:00Z") // day offset 146,098 (even)
+
+	daily := mustParse(t, "95990101/2D") // even day offsets covered
+	if daily.CoversIn(odd, time.UTC) {
+		t.Error("2D cadence: 9999-01-01 (odd day offset) should not be covered")
+	}
+	if !daily.CoversIn(even, time.UTC) {
+		t.Error("2D cadence: 9999-01-02 (even day offset) should be covered")
+	}
+
+	weekly := mustParse(t, "95990101/2W") // offset 146,097 % 14 == 7 → off-week
+	if weekly.CoversIn(odd, time.UTC) {
+		t.Error("2W cadence: 9999-01-01 (offset day 7 of 14) should not be covered")
+	}
+	onWeek := mustInstant(t, "9999-01-08T00:00:00Z") // offset % 14 == 0 → on-week start
+	if !weekly.CoversIn(onWeek, time.UTC) {
+		t.Error("2W cadence: 9999-01-08 (offset day 0 of 14) should be covered")
+	}
+}
