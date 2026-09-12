@@ -1,5 +1,5 @@
 // Package dtrexp parses and evaluates DTRExp (Date-Time Range & Recurrence
-// Expression) strings, per DTRExp draft 2.8.
+// Expression) strings, per DTRExp draft 2.9.
 //
 // A DTRExp denotes a — possibly infinite — set of time intervals. It is not
 // enumerated into dates; it is evaluated for coverage: "is this instant inside
