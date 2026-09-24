@@ -3,3 +3,6 @@ _notes/
 *.out
 coverage.out
 coverage.txt
+
+# Scratch and the latest test reports (coverage, mutation), never committed
+_backup/
