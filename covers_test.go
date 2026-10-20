@@ -180,6 +180,10 @@ func TestAPIPlumbing(t *testing.T) {
 	if got, err := e.Covers(jan, "Not/AZone"); err == nil || got {
 		t.Errorf("Covers with bad zone: got (%v, %v), want (false, error)", got, err)
 	}
+	// "Local" is the host's zone to time.LoadLocation, not an IANA name
+	if got, err := e.Covers(jan, "Local"); err == nil || got {
+		t.Errorf("Covers with \"Local\": got (%v, %v), want (false, error)", got, err)
+	}
 	if !e.CoversIn(jan, nil) {
 		t.Error("CoversIn(jan, nil) = false, want true (nil means UTC)")
 	}

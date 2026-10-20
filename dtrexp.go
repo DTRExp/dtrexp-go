@@ -126,6 +126,10 @@ func loadZone(tz string) (*time.Location, error) {
 	if tz == "" || tz == "UTC" {
 		return time.UTC, nil
 	}
+	// time.LoadLocation reads "Local" as the host's zone; it is no IANA name
+	if tz == "Local" {
+		return nil, fmt.Errorf("dtrexp: unknown time zone %q", tz)
+	}
 	loc, err := time.LoadLocation(tz)
 	if err != nil {
 		return nil, fmt.Errorf("dtrexp: unknown time zone %q: %w", tz, err)
