@@ -76,7 +76,7 @@ res.Warnings                       // [{Pos: 0, Message: "unsatisfiable â€¦"}] â
 
 ## Conformance & Quality
 
-- The test suite is driven by the shared [`vectors.json`][vectors] from the spec repo (draft 2.8): every coverage, rejection, warning and quiet vector, including the calendar traps (Feb 29 across 2000/2024/**2100**, `W53` existence, DST gap/overlap in `Europe/Berlin`). See [VECTORS.md][vectors-md] for how the suite works.
+- The test suite is driven by the shared [`vectors.json`][vectors] from the spec repo (the draft 2.8 file; draft 2.9 left the Core vectors unchanged): every coverage, rejection, warning and quiet vector, including the calendar traps (Feb 29 across 2000/2024/**2100**, `W53` existence, DST gap/overlap in `Europe/Berlin`). See [VECTORS.md][vectors-md] for how the suite works.
 - 100% statement coverage; mutation-tested with [gremlins][gremlins]. Commands and survivor justifications: [TESTING.md](TESTING.md).
 - Zero dependencies.
 
