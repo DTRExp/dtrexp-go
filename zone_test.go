@@ -110,9 +110,13 @@ func TestWithZoneRebind(t *testing.T) {
 func TestWithZoneRefuses(t *testing.T) {
 	e := mustParse(t, zoneHours)
 	cases := map[string]string{
-		"Mars/Olympus": `dtrexp: unknown time zone "Mars/Olympus": unknown time zone Mars/Olympus`,
-		"":             `dtrexp: unknown time zone "": a time zone is required to bind`,
-		"Local":        `dtrexp: unknown time zone "Local"`,
+		"Mars/Olympus":    `dtrexp: unknown time zone "Mars/Olympus": unknown time zone Mars/Olympus`,
+		"":                `dtrexp: unknown time zone "": a time zone is required to bind`,
+		"Local":           `dtrexp: unknown time zone "Local"`,
+		"localtime":       `dtrexp: unknown time zone "localtime"`,
+		"./localtime":     `dtrexp: unknown time zone "./localtime"`,
+		"posix/localtime": `dtrexp: unknown time zone "posix/localtime"`,
+		"Europe//Berlin":  `dtrexp: unknown time zone "Europe//Berlin"`,
 	}
 	for zone, msg := range cases {
 		b, err := e.WithZone(zone)

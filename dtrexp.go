@@ -15,6 +15,7 @@ package dtrexp
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -163,8 +164,9 @@ func loadZone(tz string) (*time.Location, error) {
 		return time.UTC, nil
 	}
 	// time.LoadLocation reads "Local" as the host's zone, and some systems link
-	// zoneinfo's "localtime" to it; neither is an IANA name
-	if tz == "Local" || tz == "localtime" {
+	// zoneinfo's "localtime" to it; neither is an IANA name, and nor is a path
+	// that is not normalized ("./localtime", "a//b")
+	if tz == "Local" || !ianaShaped(tz) {
 		return nil, fmt.Errorf("dtrexp: unknown time zone %q", tz)
 	}
 	loc, err := time.LoadLocation(tz)
@@ -172,4 +174,16 @@ func loadZone(tz string) (*time.Location, error) {
 		return nil, fmt.Errorf("dtrexp: unknown time zone %q: %w", tz, err)
 	}
 	return loc, nil
+}
+
+// ianaShaped reports whether tz is a normalized path whose last segment is not
+// "localtime".
+func ianaShaped(tz string) bool {
+	segs := strings.Split(tz, "/")
+	for _, seg := range segs {
+		if seg == "" || seg == "." {
+			return false
+		}
+	}
+	return segs[len(segs)-1] != "localtime"
 }
