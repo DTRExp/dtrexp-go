@@ -1,6 +1,6 @@
 # Testing
 
-The package is tested at three levels: the conformance vectors (`testdata/vectors.json`, the behavioral contract), unit tests for everything the vectors don't reach (`unit_test.go`, `covers_test.go`, `helpers_test.go`), and mutation testing with [gremlins](https://github.com/go-gremlins/gremlins).
+The package is tested at three levels: the conformance vectors (`testdata/vectors.json`, the behavioral contract), unit tests for everything the vectors don't reach (`unit_test.go`, `covers_test.go`, `zone_test.go`, `helpers_test.go`), and mutation testing with [gremlins](https://github.com/go-gremlins/gremlins).
 
 ## Commands
 

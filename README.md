@@ -35,14 +35,26 @@ if err != nil { /* a positioned ParseError */ }
 ok, err := dtr.Covers(time.Now(), "Europe/Berlin")
 // —> true on a weekday, 09:00–18:00 Berlin local time
 // The zone is an evaluation parameter, never part of the expression;
-// empty string or "UTC" means UTC.
+// an empty string means the bound zone (below), else UTC.
 
 // Preloaded zone; cannot fail:
 berlin, _ := time.LoadLocation("Europe/Berlin")
 ok = dtr.CoversIn(time.Now(), berlin)
+
+// Bound zone; the no-zone calls evaluate in it:
+hours, err := dtr.WithZone("Europe/Berlin")
+ok, err = hours.Covers(time.Now(), "")      // Berlin
+ok = hours.CoversIn(time.Now(), nil)        // Berlin
+ok, err = hours.Covers(time.Now(), "UTC")   // a zone passed to the call wins
 ```
 
 Note that you parse **once** (at write/config time) and evaluate **many**; `Expression` values are immutable after `Parse` and safe for concurrent use. `Covers` is a single calendar-field extraction followed by integer comparisons; no occurrence iteration.
+
+- `WithZone(zone)` returns a copy whose evaluation defaults to `zone`, readable as `Zone()` (`""` when unbound); the original is left as it is. The copy shares the parsed expression, so its `Source()` and `Warnings()` are the original's: the zone belongs to evaluation, never to the expression. The zone is loaded once, at bind, so an unknown name fails there; so do `""` and `"Local"`, since binding never quietly means UTC or the host's zone.
+- `Covers(t, tz)`: an empty `tz` means the bound zone, else UTC; any other `tz`, `"UTC"` included, wins over the bound zone. It returns an error only for a zone that does not load.
+- `CoversIn(t, loc)`: a nil `loc` means the bound zone, else UTC; a non-nil `loc` wins.
+
+**Which to use:** bind the zone with `WithZone` when it belongs to what the expression describes (a store's hours, a venue's schedule), and pass it per call when it belongs to whoever is asking (a rule shown to each user in their own zone). A bound copy shares its `Source()` with the original, so a cache of parsed expressions keys on `Source()` and `Zone()` together.
 
 ## Errors and Warnings
 

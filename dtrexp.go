@@ -8,7 +8,8 @@
 // out of scope.
 //
 // The evaluation model is time-zone agnostic: an expression carries no zone;
-// the zone is a parameter of Covers (default UTC).
+// the zone is a parameter of Covers, defaulting to the zone bound with
+// WithZone, else UTC.
 package dtrexp
 
 import (
@@ -72,6 +73,8 @@ type Expression struct {
 	source   string
 	branches []*branch
 	warnings []Warning
+	zone     string         // the bound zone as given, "" when unbound
+	loc      *time.Location // the bound zone, loaded at bind; nil when unbound
 }
 
 // Parse parses a DTRExp string. It returns an error for any syntactically or
@@ -97,10 +100,39 @@ func (e *Expression) Warnings() []Warning {
 // Source returns the original expression string.
 func (e *Expression) Source() string { return e.source }
 
+// WithZone returns a copy of the expression whose evaluation defaults to the
+// IANA time zone zone; e is left as it is. The copy shares e's parsed data, so
+// its Source and Warnings are e's: the zone belongs to evaluation, never to
+// the expression (spec §1). The zone is loaded once, here, so an unknown name
+// fails at once; so do "" and "Local", since binding is explicit and never
+// quietly means UTC or the host's zone. A zone passed to Covers or CoversIn
+// still wins.
+func (e *Expression) WithZone(zone string) (*Expression, error) {
+	if zone == "" {
+		return nil, fmt.Errorf("dtrexp: unknown time zone %q: a time zone is required to bind", zone)
+	}
+	loc, err := loadZone(zone)
+	if err != nil {
+		return nil, err
+	}
+	c := *e
+	c.zone, c.loc = zone, loc
+	return &c, nil
+}
+
+// Zone returns the zone bound with WithZone, as it was given, or "" when none
+// is bound.
+func (e *Expression) Zone() string { return e.zone }
+
 // Covers reports whether the absolute instant t falls inside the set denoted by
-// the expression, evaluated in IANA time zone tz. An empty tz means UTC. It
-// returns an error only if tz is not a loadable IANA zone.
+// the expression, evaluated in IANA time zone tz. An empty tz means no zone was
+// passed: the bound zone (WithZone), else UTC. Any other tz, "UTC" included,
+// wins over the bound zone. It returns an error only if tz is not a loadable
+// IANA zone.
 func (e *Expression) Covers(t time.Time, tz string) (bool, error) {
+	if tz == "" {
+		return e.CoversIn(t, nil), nil
+	}
 	loc, err := loadZone(tz)
 	if err != nil {
 		return false, err
@@ -108,8 +140,12 @@ func (e *Expression) Covers(t time.Time, tz string) (bool, error) {
 	return e.CoversIn(t, loc), nil
 }
 
-// CoversIn is Covers with an already-resolved *time.Location (nil means UTC).
+// CoversIn is Covers with an already-resolved *time.Location. A nil loc means
+// the bound zone (WithZone), else UTC; a non-nil loc wins over the bound zone.
 func (e *Expression) CoversIn(t time.Time, loc *time.Location) bool {
+	if loc == nil {
+		loc = e.loc
+	}
 	if loc == nil {
 		loc = time.UTC
 	}
@@ -123,7 +159,7 @@ func (e *Expression) CoversIn(t time.Time, loc *time.Location) bool {
 }
 
 func loadZone(tz string) (*time.Location, error) {
-	if tz == "" || tz == "UTC" {
+	if tz == "UTC" {
 		return time.UTC, nil
 	}
 	// time.LoadLocation reads "Local" as the host's zone; it is no IANA name
