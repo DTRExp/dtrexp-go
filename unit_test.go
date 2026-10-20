@@ -33,6 +33,16 @@ func TestParseErrors(t *testing.T) {
 		{"M", "requires a value", 0},
 		{"M1 M2", "duplicate designator", 3},
 		{"M1 %", "unexpected character", 3},
+		// only the ASCII space is whitespace (spec §1)
+		{"M3\tD5", "unexpected character", 2},
+		{"\tM3", "unexpected character", 0},
+		{"M3\t", "unexpected character", 2},
+		{"M3|\tM5", "unexpected character", 3},
+		{"M3\nD5", "unexpected character", 2},
+		{"M3\rD5", "unexpected character", 2},
+		{"\t", "unexpected character", 0},
+		{"M1 |\t", "unexpected character", 4},
+		{"   ", "empty expression", 0},
 		// union branches
 		{"|M1", "empty union branch", 0},
 		{"M1 |", "empty union branch", 4},

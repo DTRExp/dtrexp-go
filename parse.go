@@ -16,14 +16,14 @@ func errAt(pos int, format string, args ...any) error {
 // run static warning analysis. Branch offsets into the full source are carried
 // down so every error and warning is positioned against the original string.
 func parse(s string) (*Expression, error) {
-	if strings.TrimSpace(s) == "" {
+	if strings.Trim(s, " ") == "" {
 		return nil, errAt(0, "empty expression")
 	}
 	parts := strings.Split(s, "|")
 	e := &Expression{source: s}
 	off := 0
 	for _, part := range parts {
-		if strings.TrimSpace(part) == "" {
+		if strings.Trim(part, " ") == "" {
 			return nil, errAt(off, "empty union branch")
 		}
 		b, err := parseBranch(part, off)
@@ -180,7 +180,7 @@ func (sc *scanner) readDigits(n int) (string, bool) {
 // --- character classes -----------------------------------------------------
 
 func isDigit(c byte) bool  { return c >= '0' && c <= '9' }
-func isSpace(c byte) bool  { return c == ' ' || c == '\t' || c == '\n' || c == '\r' }
+func isSpace(c byte) bool  { return c == ' ' } // spec §1: the ASCII space only
 func isLetter(c byte) bool { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') }
 
 func isDesignator(d designator) bool {
