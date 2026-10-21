@@ -2,7 +2,6 @@ package dtrexp
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 )
 
@@ -79,7 +78,7 @@ func parseBranch(s string, base int) (*branch, error) {
 			vpPos := sc.at()
 			vp := sc.readValueRun()
 			if vp == "" {
-				return nil, errAt(desPos, "designator %q requires a value", string(c))
+				return nil, errAt(vpPos, "designator %q requires a value", string(c))
 			}
 			if b.present[des] {
 				return nil, errAt(desPos, "duplicate designator %q in one expression", string(c))
@@ -163,6 +162,16 @@ func (sc *scanner) readValueRun() string {
 	return sc.s[start:sc.pos]
 }
 
+// digitsValue returns the value of a short run of ASCII digits the scanner has
+// already checked (a date literal's or time value's fixed-width fields).
+func digitsValue(s string) int {
+	n := 0
+	for i := 0; i < len(s); i++ {
+		n = n*10 + int(s[i]-'0')
+	}
+	return n
+}
+
 func (sc *scanner) readDigits(n int) (string, bool) {
 	if sc.pos+n > len(sc.s) {
 		return "", false
@@ -202,6 +211,31 @@ func isValueChar(c byte) bool {
 	return false
 }
 
+// maxInteger is the largest value an integer may have (spec §8): 2³¹ − 1,
+// however many leading zeros it carries.
+const maxInteger = 1<<31 - 1
+
+// parseInteger reads s as an integer with an optional leading '-'. ok is false
+// when s is not a sign and a run of ASCII digits; over is true when the
+// integer's value exceeds maxInteger. Leading zeros are unlimited.
+func parseInteger(s string) (v int, ok, over bool) {
+	digits := strings.TrimPrefix(s, "-")
+	if !allDigits(digits) {
+		return 0, false, false
+	}
+	var n int64
+	for i := 0; i < len(digits); i++ {
+		n = n*10 + int64(digits[i]-'0')
+		if n > maxInteger {
+			return 0, true, true
+		}
+	}
+	if len(digits) < len(s) {
+		n = -n
+	}
+	return int(n), true, false
+}
+
 // --- date-leading components (cadence or bounds) ---------------------------
 
 func (sc *scanner) parseDateLit() (dateLit, error) {
@@ -210,33 +244,33 @@ func (sc *scanner) parseDateLit() (dateLit, error) {
 	if !ok {
 		return dateLit{}, errAt(start, "invalid date literal (need 8 digits)")
 	}
-	y, _ := strconv.Atoi(digits[0:4])
-	mo, _ := strconv.Atoi(digits[4:6])
-	d, _ := strconv.Atoi(digits[6:8])
-	lit := dateLit{year: y, month: mo, day: d, prec: precDay}
+	lit := dateLit{year: digitsValue(digits[0:4]), month: digitsValue(digits[4:6]), day: digitsValue(digits[6:8]), prec: precDay}
 
-	// Unconditional T-glue: a T after 8 digits belongs to the literal.
-	tstart := sc.at()
+	// Unconditional T-glue: a T after 8 digits belongs to the literal. Every
+	// error in the literal, its time part included, is positioned at its start.
 	if !sc.eof() && sc.peek() == 'T' {
 		sc.next()
-		tstart = sc.at()
 		hhmm, ok := sc.readDigits(4)
 		if !ok {
-			return dateLit{}, errAt(tstart, "malformed time-part in date literal")
+			return dateLit{}, errAt(start, "malformed time-part in date literal")
 		}
-		lit.hour, _ = strconv.Atoi(hhmm[0:2])
-		lit.minute, _ = strconv.Atoi(hhmm[2:4])
+		lit.hour, lit.minute = digitsValue(hhmm[0:2]), digitsValue(hhmm[2:4])
 		lit.prec = precMinute
 		if ss, ok := sc.readDigits(2); ok {
-			lit.second, _ = strconv.Atoi(ss)
+			lit.second = digitsValue(ss)
 			lit.prec = precSecond
 		}
+	}
+	// a date literal is exactly 8 digits (and its time part 4 or 6): a further
+	// digit makes the whole run malformed, never a second literal
+	if !sc.eof() && isDigit(sc.peek()) {
+		return dateLit{}, errAt(start, "malformed date literal: too many digits")
 	}
 	if !validCivilDate(lit.year, lit.month, lit.day) {
 		return dateLit{}, errAt(start, "%04d%02d%02d is not a real calendar date", lit.year, lit.month, lit.day)
 	}
 	if lit.hour > 23 || lit.minute > 59 || lit.second > 59 {
-		return dateLit{}, errAt(tstart, "invalid time in date literal")
+		return dateLit{}, errAt(start, "invalid time in date literal")
 	}
 	return lit, nil
 }
@@ -280,7 +314,9 @@ func (sc *scanner) parseBoundsUpper(b *branch, lower dateLit, start int) error {
 		if err != nil {
 			return err
 		}
-		if compareLit(lower, upper) > 0 {
+		// backwards when the first span begins at or after the last span's
+		// end; mixed precision is valid in either order (spec §6)
+		if !spanStart(lower).Before(spanEnd(upper)) {
 			return errAt(upperStart, "backwards bounds range")
 		}
 		bd.hasUpper = true
@@ -294,7 +330,7 @@ func (sc *scanner) parseBoundsStar(b *branch) error {
 	start := sc.at()
 	sc.next() // '*'
 	if sc.eof() || sc.peek() != ':' {
-		return errAt(start, "unexpected %q", "*")
+		return errAt(sc.at(), "expected ':' after a bounds %q", "*")
 	}
 	sc.next() // ':'
 	if !sc.eof() && sc.peek() == '*' {
@@ -309,21 +345,6 @@ func (sc *scanner) parseBoundsStar(b *branch) error {
 	}
 	b.bounds = &bounds{hasUpper: true, upper: upper}
 	return nil
-}
-
-// compareLit compares two date literals by start-of-span.
-func compareLit(a, c dateLit) int {
-	ka := [...]int{a.year, a.month, a.day, a.hour, a.minute, a.second}
-	kc := [...]int{c.year, c.month, c.day, c.hour, c.minute, c.second}
-	for i := range ka {
-		if ka[i] != kc[i] {
-			if ka[i] < kc[i] {
-				return -1
-			}
-			return 1
-		}
-	}
-	return 0
 }
 
 var cadenceUnits = map[byte]bool{'Y': true, 'M': true, 'W': true, 'D': true, 'H': true, 'm': true}
@@ -373,7 +394,10 @@ func (sc *scanner) readCadencePart() (int, byte, error) {
 	if sc.pos == start {
 		return 0, 0, errAt(sc.at(), "cadence missing count")
 	}
-	n, _ := strconv.Atoi(sc.s[start:sc.pos])
+	n, _, over := parseInteger(sc.s[start:sc.pos])
+	if over {
+		return 0, 0, errAt(sc.base+start, "integer above %d", maxInteger)
+	}
 	if sc.eof() {
 		return 0, 0, errAt(sc.at(), "cadence missing unit")
 	}
@@ -386,7 +410,7 @@ func (sc *scanner) readCadencePart() (int, byte, error) {
 }
 
 // unit lengths in seconds for the conservative duration<period check (§5.2).
-func unitMaxSeconds(u byte) int {
+func unitMaxSeconds(u byte) int64 {
 	switch u {
 	case 'Y':
 		return 366 * 86400
@@ -404,7 +428,7 @@ func unitMaxSeconds(u byte) int {
 	return 0
 }
 
-func unitMinSeconds(u byte) int {
+func unitMinSeconds(u byte) int64 {
 	switch u {
 	case 'Y':
 		return 365 * 86400
@@ -440,7 +464,9 @@ func validateCadence(c *cadence, pos int) error {
 		}
 		return nil
 	}
-	if c.duration*unitMaxSeconds(c.durationUnit) >= c.period*unitMinSeconds(c.periodUnit) {
+	// int64: a count may reach maxInteger, and a year of seconds times that
+	// overflows a 32-bit int
+	if int64(c.duration)*unitMaxSeconds(c.durationUnit) >= int64(c.period)*unitMinSeconds(c.periodUnit) {
 		return errAt(pos, "cadence duration not conservatively smaller than period")
 	}
 	return nil

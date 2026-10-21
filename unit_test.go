@@ -30,7 +30,7 @@ func TestParseErrors(t *testing.T) {
 		{"z1", "unknown designator", 0},
 		{"A1", "unknown designator", 0},
 		{"Z1", "unknown designator", 0},
-		{"M", "requires a value", 0},
+		{"M", "requires a value", 1}, // the end of input, where a value was required
 		{"M1 M2", "duplicate designator", 3},
 		{"M1 %", "unexpected character", 3},
 		// only the ASCII space is whitespace (spec §1)
@@ -49,17 +49,24 @@ func TestParseErrors(t *testing.T) {
 		{"M1 | M99", "out of domain", 6}, // positions are global, not branch-local
 		// date literals & bounds
 		{"2020", "8 digits", 0},
-		{"19000229", "not a real calendar date", 0}, // 1900 is not a leap year
-		{"20200101T2400", "invalid time in date literal", 9},
-		{"20200101T2360", "invalid time in date literal", 9},
-		{"20200101T235960", "invalid time in date literal", 9},
+		{"19000229", "not a real calendar date", 0},          // 1900 is not a leap year
+		{"20200101T2400", "invalid time in date literal", 0}, // the literal's start
+		{"20200101T2360", "invalid time in date literal", 0},
+		{"20200101T235960", "invalid time in date literal", 0},
+		{"20200101T12", "malformed time-part", 0},
+		{"20200101T12000", "too many digits", 0}, // 5 digits: neither hhmm nor hhmmss
+		{"20200101T1200001", "too many digits", 0},
+		{"202001011/1D", "too many digits", 0},
+		{"20200101:202001021", "too many digits", 9},
+		{"00000101:*", "not a real calendar date", 0}, // year 0 is outside 1–9999
+		{"20240101T1800:20240101T175959", "backwards bounds range", 14},
 		{"20201301", "not a real calendar date", 0},
 		{"20200001", "not a real calendar date", 0},
 		{"20200101 20200202", "more than one bounds", 9},
 		{"20200101:2020", "8 digits", 9},
 		{"20191231:20190101", "backwards bounds range", 9},
-		{"*", "unexpected", 0},
-		{"*x", "unexpected", 0},
+		{"*", "expected ':'", 1}, // the end of input, where the ':' was required
+		{"*x", "expected ':'", 1},
 		{"*:2020", "8 digits", 2},
 		{"*:*", "at least one date-literal endpoint", 2},
 		{"20200101 *:20220101", "more than one bounds", 9},
@@ -80,29 +87,36 @@ func TestParseErrors(t *testing.T) {
 		{"M!1#2", "stride or ordinal", 3},
 		{"M!99", "out of domain", 2},
 		{"M1,", "empty value item", 3},
-		{"M*,1", "bare", 1},
+		{"M*,1", "a list cannot follow", 2}, // 'M*' is whole; the ',' cannot follow
 		{"M1,*", "bare", 3},
+		{"M!*,1", "bare", 2},
 		// ranges
-		{"M1:2:3", "malformed range", 1},
+		{"M1:2:3", "malformed range", 4}, // the second ':'
+		{"M10:20:3", "malformed range", 6},
 		{"M99:2", "out of domain", 1},
 		{"M1:99", "out of domain", 3},
-		{"Y2024:2020", "backwards range on Y", 1},
-		{"Y0", "out of domain", 1}, // zero is out of domain, not "negative"
+		{"Y2024:2020", "backwards range on Y", 6}, // the end that cannot follow its start
+		{"Y0", "out of domain", 1},                // zero is out of domain, not "negative"
 		{"M-", "invalid value", 1},
 		// ordinals
 		{"M1#2", "only valid on E", 2},
-		{"E1#2#3", "malformed ordinal", 1},
+		{"E1#2#3", "malformed ordinal", 4},
+		{"E1#22#3", "malformed ordinal", 5},
 		{"E9#2", "out of domain", 1},
-		{"E*#2", "ordinal weekday must be a value", 1},
+		{"E*#2", "ordinal weekday must be a value", 2},
 		{"E1#", "invalid ordinal", 3},
 		// strides
-		{"M1/2/3/4", "malformed stride", 1},
+		{"M1/2/3/4", "malformed stride", 6}, // the third '/'
+		{"M10/20/30/4", "malformed stride", 9},
 		{"M1,2/2", "stride not allowed on a list", 4},
-		{"M1:2:3/2", "malformed stride range", 1},
+		{"M1:2:3/2", "malformed stride range", 4},
+		{"M1:20:3/2", "malformed stride range", 5},
 		{"M99:5/2", "out of domain", 1},
 		{"M1:99/2", "out of domain", 3},
-		{"M10:2/2", "wrap ranges take no stride", 1},
-		{"H5:0/2", "wrap ranges take no stride", 1}, // zero end is still a wrap
+		{"M10:2/2", "wrap ranges take no stride", 5}, // the '/'
+		{"H5:0/2", "wrap ranges take no stride", 4},  // zero end is still a wrap
+		{"Y*:2020/2", "anchorless stride", 7},
+		{"D-3/2", "stride start must be non-negative", 3},
 		{"M99/2", "out of domain", 1},
 		{"M1/", "invalid stride interval", 3},
 		{"M1/3/", "invalid stride duration", 5},
@@ -111,17 +125,38 @@ func TestParseErrors(t *testing.T) {
 		{"T!12", "no exclusion", 1},
 		{"T12/2", "no stride", 3},
 		{"T12,", "empty T item", 4},
-		{"T10:12:14", "malformed T range", 1},
+		{"T10:12:14", "malformed T range", 6},
+		{"T1000:12:14", "malformed T range", 8},
 		{"T*", `no "*"`, 1},
 		{"T*:12", `no "*"`, 1},
 		{"T12:*", `no "*"`, 4},
-		{"T120000.12", "malformed millisecond", 8},
-		{"T.12", "malformed millisecond", 2}, // fraction validated before the empty HH part
+		{"T120000.12", "milliseconds follow only", 7}, // the '.', not three digits after it
+		{"T.12", "milliseconds follow only", 1},
+		{"T12.500", "milliseconds follow only", 3},
+		{"T12000.500", "milliseconds follow only", 6},
+		{"T1200:1201.000", "milliseconds follow only", 10},
 		{"T-2", "malformed time value", 1},
 		{"T126000", "minute out of range", 1},
 		{"T120060", "second out of range", 1},
 		{"T123", "malformed time value", 1},
-		{"T.500", "malformed time value", 1},
+		{"T.500", "milliseconds follow only", 1},
+		{"T1200:12", "equal endpoints", 6}, // the range end
+		// exclusions take a value list
+		{"M!*", "bare", 2},
+		{"T09 M!*", "bare", 6},
+		// the integer limit (spec §8): leading zeros are free, the value is not
+		{"M2147483648", "integer above 2147483647", 1},
+		{"M-2147483648", "integer above 2147483647", 1},
+		{"M99999999999999999999", "integer above 2147483647", 1},
+		{"Y2020:2147483648", "integer above 2147483647", 6},
+		{"E7#-2147483648", "integer above 2147483647", 3},
+		{"M1/2147483648", "integer above 2147483647", 3},
+		{"M1/3/2147483648", "integer above 2147483647", 5},
+		{"Y1:*/2147483648", "integer above 2147483647", 5},
+		{"Y1:*/10/2147483648", "integer above 2147483647", 8},
+		{"20200101/99999999999999999999D", "integer above 2147483647", 9},
+		{"20200101/2D/2147483648D", "integer above 2147483647", 12},
+		{"M1/2147483647", "exceeds parent domain", 3}, // at the limit: an ordinary integer
 	}
 	for _, c := range cases {
 		_, err := Parse(c.expr)
@@ -157,7 +192,18 @@ func TestParseValid(t *testing.T) {
 		"20200101", "20201231",
 		// time-part edges
 		"20200101T2359", "20200101T235959",
-		"T23", "T2359", "T235959",
+		"T23", "T2359", "T235959", "T235959.999",
+		// year 1 is the first date-literal year
+		"00010101", "00010101/1D/1H",
+		// mixed-precision bounds compare the first span's start with the last
+		// span's end
+		"20240101T1800:20240101", "20240101T180030:20240101T1800",
+		"20240101T175959:20240101T1800",
+		// the integer limit is inclusive and leading zeros are unlimited
+		"Y1:*/2147483647", "Y1:*/2147483647/2147483646", "M0000000000000003",
+		"Y2020:*/10000000", "Y1:*/10000001", "E7#-0000000001",
+		"20200101/2147483647D/2147483646D", "20200101/2147483647m",
+		"M!*:*",
 	}
 	for _, expr := range valid {
 		if _, err := Parse(expr); err != nil {
@@ -192,12 +238,14 @@ func TestWarningPositions(t *testing.T) {
 		expr string
 		pos  int
 	}{
-		{"D30 M2", 0},  // the impossible D selector
-		{"M2 D30", 3},  // same warning, D later in the source
-		{"Q2 D92", 3},  // quarter-scoped D
-		{"M3 Q2", 0},   // M/Q disjoint -> the M selector
-		{"Q2 M3", 3},   // M/Q disjoint, M later in the source
-		{"T09 M!*", 4}, // full-domain exclusion, offset past the T component
+		{"D30 M2", 0},    // the impossible D selector
+		{"M2 D30", 3},    // same warning, D later in the source
+		{"Q2 D92", 3},    // quarter-scoped D
+		{"M3 Q2", 0},     // M/Q disjoint -> the M selector
+		{"Q2 M3", 3},     // M/Q disjoint, M later in the source
+		{"T09 M!*:*", 4}, // full-domain exclusion, offset past the T component
+		{"T09 Y!*:*", 4},
+		{"D5 M-2:2", 3}, // an empty scoping selector warns itself; D keeps every month size
 	}
 	for _, c := range cases {
 		e := mustParse(t, c.expr)
@@ -275,10 +323,11 @@ func TestValidate(t *testing.T) {
 // month/quarter quiet path.
 func TestStaticAnalysisExtra(t *testing.T) {
 	warn := []string{
-		"Q2 D92", // Q2 is always 91 days
-		"M!*",    // excluding the whole domain matches nothing
-		"M3 Q2",  // March is not in Q2
-		"M7 Q2",  // July is not in Q2
+		"Q2 D92",    // Q2 is always 91 days
+		"M!*:*",     // excluding the whole domain matches nothing
+		"M3 Q2",     // March is not in Q2
+		"M7 Q2",     // July is not in Q2
+		"W53 Y9999", // the year walk reaches the domain's last year, which has 52 weeks
 	}
 	for _, expr := range warn {
 		e, err := Parse(expr)
@@ -305,6 +354,8 @@ func TestStaticAnalysisExtra(t *testing.T) {
 		"W53 Y2020:2021", // range Y — same
 		"D31 M1,3",       // multi-value M — day domain stays open
 		"Q3,4 D92",       // multi-value Q — day domain stays {90,91,92}
+		"D31 M11,12",     // the walk reaches the domain's last month
+		"D30 M2,4",       // February alone has no day 30; April has
 	}
 	for _, expr := range quiet {
 		e, err := Parse(expr)

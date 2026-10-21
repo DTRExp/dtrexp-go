@@ -230,3 +230,38 @@ func TestCadenceFarHorizon(t *testing.T) {
 		t.Error("2W cadence: 9999-01-08 (offset day 0 of 14) should be covered")
 	}
 }
+
+// TestCadenceLimitCounts pins cadences whose counts reach the integer limit
+// (spec §8). A calendar-period window's H/m duration once went through
+// time.Duration, which overflows past ~292 years and wrapped the window's end
+// below its start; every count now meets a date in int64 seconds or months.
+func TestCadenceLimitCounts(t *testing.T) {
+	cases := []struct {
+		expr, at string
+		want     bool
+	}{
+		{"00010101/2147483647Y/3000000H", "0300-12-31T00:00:00Z", true}, // 3,000,000 hours is ~342 years
+		{"00010101/2147483647Y/3000000H", "0400-12-31T00:00:00Z", false},
+		{"00010101/2147483647Y/2147483646H", "9999-12-31T00:00:00Z", true},
+		{"00010101/2147483647Y/2147483646m", "4000-12-31T00:00:00Z", true}, // ~4,083 years
+		{"00010101/2147483647Y/2147483646m", "9999-12-31T00:00:00Z", false},
+		{"00010101/2147483647Y/2147483646Y", "9999-12-31T00:00:00Z", true},
+		{"00010101/2147483647M/2147483646M", "9999-12-31T00:00:00Z", true},
+		{"00010101/2147483647M/2147483646W", "9999-12-31T00:00:00Z", true},
+		{"00010101/2147483647W/2147483646W", "9999-12-31T00:00:00Z", true},
+		{"00010101/2147483647D/2147483646D", "9999-12-31T00:00:00Z", true},
+		{"00010101/2147483647H/2147483646H", "9999-12-31T00:00:00Z", true},
+		{"20200101/2147483647D/2147483646D", "2019-12-31T00:00:00Z", false},
+		{"99991231/2147483647D", "9999-12-31T12:00:00Z", true},
+		{"99991231/2147483647Y", "9999-12-31T12:00:00Z", true},
+		{"99991231T2359/2147483647m", "9999-12-31T23:59:30Z", true},
+		{"Y1:*/2147483647", "0001-12-31T00:00:00Z", true},
+		{"Y1:*/2147483647", "9999-12-31T00:00:00Z", false},
+	}
+	for _, c := range cases {
+		e := mustParse(t, c.expr)
+		if got := e.CoversIn(mustInstant(t, c.at), time.UTC); got != c.want {
+			t.Errorf("%q @ %s = %v, want %v", c.expr, c.at, got, c.want)
+		}
+	}
+}

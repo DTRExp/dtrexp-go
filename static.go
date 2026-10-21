@@ -4,8 +4,9 @@ import "fmt"
 
 // analyzeWarnings implements the §9.1 required-minimum static analysis:
 //   - per-selector satisfiability against the domain sizes implied by co-present
-//     selectors (catches D30 M2, W53 Y2021, statically-empty non-wrap ranges
-//     like D-1:5 and M-2:2, and full-domain exclusions like M!1:12),
+//     selectors (catches D30 M2, D31 M4:6/2, W53 Y2021:2025, statically-empty
+//     non-wrap ranges like D-1:5 and M-2:2, and full-domain exclusions like
+//     M!1:12 and Y!1:9999),
 //   - M ∩ Q disjointness (M-1 Q1).
 //
 // Warnings from every union branch surface on the whole expression, each
@@ -27,8 +28,10 @@ func analyzeWarnings(e *Expression) []Warning {
 // selector, or nil when the branch is satisfiable.
 func branchUnsatisfiable(b *branch) *Warning {
 	for _, s := range b.selectors {
-		if hasOrdinal(s) || s.des == desY {
-			continue // ordinals need occurrence context; Y is unbounded
+		// ordinals need occurrence context; a Y selector selects at least one
+		// year unless it is an exclusion
+		if hasOrdinal(s) || (s.des == desY && !s.exclude) {
+			continue
 		}
 		sizes := possibleSizes(b, s)
 		if !selectorSatisfiable(s, sizes) {
@@ -48,39 +51,33 @@ func hasOrdinal(s *selector) bool {
 }
 
 // possibleSizes returns the candidate maximum domain values for a selector,
-// given co-present scoping selectors.
+// given co-present scoping selectors: the sizes of every parent instance the
+// scoping selector can select, whatever its form (a value, a list, a closed
+// span or a stride).
 func possibleSizes(b *branch, s *selector) []int {
 	switch s.des {
 	case desW:
-		if y, ok := singleValueOf(b, desY); ok {
-			return []int{weeksInISOYear(y)}
-		}
-		return []int{52, 53}
+		return scopedSizes(b, desY, []int{52, 53}, func(y int) []int { return []int{weeksInISOYear(y)} })
 	case desD:
 		switch s.scope {
 		case desY:
 			// with W present, Y is the ISO week-year while day-of-year stays
 			// calendar (spec §2) — cross-selector territory, stays quiet (§9.1)
-			if !b.present[desW] {
-				if y, ok := singleValueOf(b, desY); ok {
-					return []int{daysInYear(y)}
-				}
+			if b.present[desW] {
+				return []int{365, 366}
 			}
-			return []int{365, 366}
+			return scopedSizes(b, desY, []int{365, 366}, func(y int) []int { return []int{daysInYear(y)} })
 		case desQ:
-			if q, ok := singleValueOf(b, desQ); ok {
-				return dedupe([]int{quarterDays(2001, q), quarterDays(2000, q)})
-			}
-			return []int{90, 91, 92}
+			return scopedSizes(b, desQ, []int{90, 91, 92}, func(q int) []int {
+				return []int{quarterDays(2001, q), quarterDays(2000, q)}
+			})
 		default: // month
-			if m, ok := singleValueOf(b, desM); ok {
-				if m == 2 {
-					return []int{28, 29}
-				}
-				return []int{daysInMonth(2001, m)}
-			}
-			return []int{28, 29, 30, 31}
+			return scopedSizes(b, desM, []int{28, 29, 30, 31}, func(m int) []int {
+				return []int{daysInMonth(2001, m), daysInMonth(2000, m)}
+			})
 		}
+	case desY:
+		return []int{9999}
 	default:
 		return []int{domainSpec(s.des, s.scope).maxV}
 	}
@@ -149,41 +146,45 @@ func monthQuarterDisjoint(b *branch) *Warning {
 	return &Warning{Pos: mSel.pos, Message: "unsatisfiable — M and Q select disjoint months"}
 }
 
-// singleValueOf returns the single positive value a designator selects, if the
-// selector is exactly one plain value (used to pin down domain sizes).
-func singleValueOf(b *branch, des designator) (int, bool) {
-	if !b.present[des] {
-		return 0, false
-	}
+// scopedSizes returns the domain sizes of the parent instances the branch's
+// des selector selects (sizesOf gives one instance's sizes), or all when the
+// branch has no such selector or it selects nothing (that selector draws its
+// own warning). all lists every size an instance can have, so the walk stops
+// once it has found them all.
+func scopedSizes(b *branch, des designator, all []int, sizesOf func(int) []int) []int {
+	var sel *selector
 	for _, s := range b.selectors {
-		if s.des != des {
+		if s.des == des {
+			sel = s
+		}
+	}
+	if sel == nil {
+		return all
+	}
+	spec := domainSpec(des, 0)
+	seen := map[int]bool{}
+	var out []int
+	for v := spec.minV; v <= spec.maxV; v++ {
+		if !matchesValue(sel, v, spec.minV, spec.maxV) {
 			continue
 		}
-		if s.exclude || len(s.terms) != 1 {
-			return 0, false
+		for _, n := range sizesOf(v) {
+			if !seen[n] {
+				seen[n] = true
+				out = append(out, n)
+			}
 		}
-		t := s.terms[0]
-		if t.kind == termSingle && !t.start.star && t.start.val >= 0 {
-			return t.start.val, true
+		if len(out) == len(all) {
+			break
 		}
-		return 0, false
 	}
-	return 0, false
+	if len(out) == 0 {
+		return all
+	}
+	return out
 }
 
 func quarterDays(y, q int) int {
 	m := (q-1)*3 + 1
 	return daysInMonth(y, m) + daysInMonth(y, m+1) + daysInMonth(y, m+2)
-}
-
-func dedupe(in []int) []int {
-	seen := map[int]bool{}
-	var out []int
-	for _, v := range in {
-		if !seen[v] {
-			seen[v] = true
-			out = append(out, v)
-		}
-	}
-	return out
 }

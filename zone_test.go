@@ -1,6 +1,11 @@
 package dtrexp
 
 import (
+	"archive/zip"
+	"errors"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -110,7 +115,7 @@ func TestWithZoneRebind(t *testing.T) {
 func TestWithZoneRefuses(t *testing.T) {
 	e := mustParse(t, zoneHours)
 	cases := map[string]string{
-		"Mars/Olympus":    `dtrexp: unknown time zone "Mars/Olympus": unknown time zone Mars/Olympus`,
+		"Mars/Olympus":    `dtrexp: unknown time zone "Mars/Olympus"`,
 		"":                `dtrexp: unknown time zone "": a time zone is required to bind`,
 		"Local":           `dtrexp: unknown time zone "Local"`,
 		"localtime":       `dtrexp: unknown time zone "localtime"`,
@@ -146,5 +151,99 @@ func TestWithZoneKeepsExpression(t *testing.T) {
 	}
 	if len(mustParse(t, "D30 M2").Warnings()) == 0 {
 		t.Fatal("D30 M2 should warn")
+	}
+}
+
+// TestZoneIdentifiers pins the accepted identifiers (API.md): the tz
+// database's zone and link names, in any case, bound in the database's
+// spelling; anything else is an unknown zone, whatever the host's zoneinfo
+// folder holds.
+func TestZoneIdentifiers(t *testing.T) {
+	e := mustParse(t, zoneHours)
+	at := mustInstant(t, "2026-07-07T07:30:00Z") // 09:30 in Berlin
+	for given, canonical := range map[string]string{
+		"Europe/Berlin": "Europe/Berlin",
+		"europe/berlin": "Europe/Berlin",
+		"EUROPE/BERLIN": "Europe/Berlin",
+		"utc":           "UTC",
+		"US/Eastern":    "US/Eastern", // a link name stays the name given
+		"etc/gmt+5":     "Etc/GMT+5",
+		"EUROPE/ZURICH": "Europe/Zurich",
+		"europe/zurich": "Europe/Zurich", // both ends of A–Z fold in the list too
+		"america/aruba": "America/Aruba",
+	} {
+		b := mustWithZone(t, e, given)
+		if b.Zone() != canonical {
+			t.Errorf("WithZone(%q).Zone() = %q, want %q", given, b.Zone(), canonical)
+		}
+	}
+	if !mustCovers(t, e, at, "europe/berlin") {
+		t.Error(`Covers(07:30Z, "europe/berlin") = false, want true (09:30 Berlin)`)
+	}
+	for _, zone := range []string{
+		"Z", "+02:00", "UTC+2", "GMT+2", "posixrules", "Factory", "factory",
+		"SystemV/AST4", "localtime", "Local", "posix/Europe/Berlin",
+		"right/UTC", "/usr/share/zoneinfo/UTC", "Europe/Berlin ", " UTC",
+		"Asia/\u212Aolkata", // the Kelvin sign lowercases to 'k' outside ASCII
+	} {
+		if got, err := e.Covers(at, zone); err == nil || got {
+			t.Errorf("Covers(%q) = (%v, %v), want (false, error)", zone, got, err)
+		}
+		if b, err := e.WithZone(zone); err == nil || b != nil {
+			t.Errorf("WithZone(%q) = (%v, %v), want (nil, error)", zone, b, err)
+		}
+	}
+}
+
+// TestZoneLoadFails pins the error for a listed name the host cannot load.
+func TestZoneLoadFails(t *testing.T) {
+	defer func(f func(string) (*time.Location, error)) { loadLocation = f }(loadLocation)
+	loadLocation = func(name string) (*time.Location, error) {
+		return nil, errors.New("no zone file for " + name)
+	}
+	_, err := mustParse(t, "M1").Covers(time.Now(), "asia/tokyo")
+	if err == nil || err.Error() != `dtrexp: unknown time zone "asia/tokyo": no zone file for Asia/Tokyo` {
+		t.Errorf("Covers with an unloadable zone: err = %v", err)
+	}
+}
+
+// TestZoneNamesLoad pins that every listed name loads, and that the list is
+// the Go toolchain's own (minus Factory): a toolchain whose database adds or
+// drops a name fails here until zones.go follows.
+func TestZoneNamesLoad(t *testing.T) {
+	listed := map[string]bool{}
+	for _, n := range strings.Fields(tzNames) {
+		listed[n] = true
+		if _, err := time.LoadLocation(n); err != nil {
+			t.Errorf("listed zone %q does not load: %v", n, err)
+		}
+	}
+	if len(listed) != len(tzCanonical) {
+		t.Errorf("%d names, %d case-folded: two names differ only in case", len(listed), len(tzCanonical))
+	}
+	out, err := exec.Command("go", "env", "GOROOT").Output()
+	if err != nil {
+		t.Skipf("no go toolchain: %v", err)
+	}
+	zr, err := zip.OpenReader(filepath.Join(strings.TrimSpace(string(out)), "lib", "time", "zoneinfo.zip"))
+	if err != nil {
+		t.Skipf("no zoneinfo.zip: %v", err)
+	}
+	defer zr.Close()
+	bundled := map[string]bool{}
+	for _, f := range zr.File {
+		if f.Name != "Factory" {
+			bundled[f.Name] = true
+		}
+	}
+	for n := range bundled {
+		if !listed[n] {
+			t.Errorf("the toolchain's database names %q; zones.go does not", n)
+		}
+	}
+	for n := range listed {
+		if !bundled[n] {
+			t.Errorf("zones.go names %q; the toolchain's database does not", n)
+		}
 	}
 }

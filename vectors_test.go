@@ -19,6 +19,7 @@ type vectorFile struct {
 	Invalid []struct {
 		Expression string `json:"expression"`
 		Reason     string `json:"reason"`
+		Position   int    `json:"position"`
 	} `json:"invalid"`
 	Warnings []struct {
 		Expression string `json:"expression"`
@@ -93,14 +94,14 @@ func TestInvalid(t *testing.T) {
 			fail++
 			continue
 		}
-		if pe.Pos < 0 || pe.Pos > len(c.Expression) {
-			t.Errorf("parse error for %q at %d, want a position within the source", c.Expression, pe.Pos)
+		if pe.Pos != c.Position {
+			t.Errorf("parse error for %q (%s) at %d, want %d: %s", c.Expression, c.Reason, pe.Pos, c.Position, pe.Msg)
 			fail++
 			continue
 		}
 		pass++
 	}
-	t.Logf("invalid: %d rejected, %d wrongly accepted", pass, fail)
+	t.Logf("invalid: %d rejected at their position, %d failed", pass, fail)
 }
 
 func TestWarnings(t *testing.T) {

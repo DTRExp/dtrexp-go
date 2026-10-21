@@ -1,5 +1,5 @@
 // Package dtrexp parses and evaluates DTRExp (Date-Time Range & Recurrence
-// Expression) strings, per DTRExp draft 2.9.
+// Expression) strings, per DTRExp draft 3.
 //
 // A DTRExp denotes a — possibly infinite — set of time intervals. It is not
 // enumerated into dates; it is evaluated for coverage: "is this instant inside
@@ -15,14 +15,15 @@ package dtrexp
 import (
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 )
 
 // ParseError is a positioned syntax error: what went wrong and where. Pos is
-// the 0-based character offset of the offending input in the source string
-// (DTR expressions are ASCII, so byte and character offsets coincide).
-// Every error Parse returns for invalid source is a ParseError.
+// the 0-based offset, in Unicode code points, of the first character of the
+// token at fault (spec §8). The grammar is ASCII and parsing stops at the first
+// character outside it, so every character before Pos is ASCII and Pos is
+// also the byte offset. Every error Parse returns for invalid source is a
+// ParseError.
 type ParseError struct {
 	Pos int
 	Msg string
@@ -112,29 +113,30 @@ func (e *Expression) WithZone(zone string) (*Expression, error) {
 	if zone == "" {
 		return nil, fmt.Errorf("dtrexp: unknown time zone %q: a time zone is required to bind", zone)
 	}
-	loc, err := loadZone(zone)
+	name, loc, err := loadZone(zone)
 	if err != nil {
 		return nil, err
 	}
 	c := *e
-	c.zone, c.loc = zone, loc
+	c.zone, c.loc = name, loc
 	return &c, nil
 }
 
-// Zone returns the zone bound with WithZone, as it was given, or "" when none
-// is bound.
+// Zone returns the zone bound with WithZone, in the tz database's spelling
+// ("europe/berlin" binds as "Europe/Berlin"), or "" when none is bound.
 func (e *Expression) Zone() string { return e.zone }
 
 // Covers reports whether the absolute instant t falls inside the set denoted by
 // the expression, evaluated in IANA time zone tz. An empty tz means no zone was
 // passed: the bound zone (WithZone), else UTC. Any other tz, "UTC" included,
-// wins over the bound zone. It returns an error only if tz is not a loadable
-// IANA zone.
+// wins over the bound zone. tz is a tz database zone or link name, matched
+// without regard to case; it returns an error only if tz is not one, or its
+// zone does not load.
 func (e *Expression) Covers(t time.Time, tz string) (bool, error) {
 	if tz == "" {
 		return e.CoversIn(t, nil), nil
 	}
-	loc, err := loadZone(tz)
+	_, loc, err := loadZone(tz)
 	if err != nil {
 		return false, err
 	}
@@ -159,31 +161,23 @@ func (e *Expression) CoversIn(t time.Time, loc *time.Location) bool {
 	return false
 }
 
-func loadZone(tz string) (*time.Location, error) {
-	if tz == "UTC" {
-		return time.UTC, nil
-	}
-	// time.LoadLocation reads "Local" as the host's zone, and some systems link
-	// zoneinfo's "localtime" to it; neither is an IANA name, and nor is a path
-	// that is not normalized ("./localtime", "a//b")
-	if tz == "Local" || !ianaShaped(tz) {
-		return nil, fmt.Errorf("dtrexp: unknown time zone %q", tz)
-	}
-	loc, err := time.LoadLocation(tz)
-	if err != nil {
-		return nil, fmt.Errorf("dtrexp: unknown time zone %q: %w", tz, err)
-	}
-	return loc, nil
-}
+// loadLocation reads a zone's rules; a variable so a test can stand in for a
+// host whose zone source lacks a listed name.
+var loadLocation = time.LoadLocation
 
-// ianaShaped reports whether tz is a normalized path whose last segment is not
-// "localtime".
-func ianaShaped(tz string) bool {
-	segs := strings.Split(tz, "/")
-	for _, seg := range segs {
-		if seg == "" || seg == "." {
-			return false
-		}
+// loadZone resolves tz, a tz database zone or link name in any case, to its
+// spelling in the database and its rules. time.LoadLocation reads a name as a
+// path (and "Local" as the host's zone), so the name is checked against the
+// database's own list first (zones.go): a fixed offset, "Z", "Local", a path,
+// and a zoneinfo file that names no zone are unknown zones.
+func loadZone(tz string) (string, *time.Location, error) {
+	name, ok := tzCanonical[asciiLower(tz)]
+	if !ok {
+		return "", nil, fmt.Errorf("dtrexp: unknown time zone %q", tz)
 	}
-	return segs[len(segs)-1] != "localtime"
+	loc, err := loadLocation(name)
+	if err != nil {
+		return "", nil, fmt.Errorf("dtrexp: unknown time zone %q: %w", tz, err)
+	}
+	return name, loc, nil
 }

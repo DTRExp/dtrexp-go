@@ -61,7 +61,7 @@ func TestCadenceDefaults(t *testing.T) {
 }
 
 func TestFloorDivMod(t *testing.T) {
-	cases := []struct{ a, b, q int }{
+	cases := []struct{ a, b, q int64 }{
 		{7, 2, 3},
 		{-1, 12, -1},
 		{-24, 12, -2},
@@ -80,13 +80,13 @@ func TestFloorDivMod(t *testing.T) {
 }
 
 func TestUnitSeconds(t *testing.T) {
-	maxes := map[byte]int{'Y': 366 * 86400, 'M': 31 * 86400, 'W': 7 * 86400, 'D': 86400, 'H': 3600, 'm': 60, 'x': 0}
+	maxes := map[byte]int64{'Y': 366 * 86400, 'M': 31 * 86400, 'W': 7 * 86400, 'D': 86400, 'H': 3600, 'm': 60, 'x': 0}
 	for u, want := range maxes {
 		if got := unitMaxSeconds(u); got != want {
 			t.Errorf("unitMaxSeconds(%q) = %d, want %d", string(u), got, want)
 		}
 	}
-	mins := map[byte]int{'Y': 365 * 86400, 'M': 28 * 86400, 'W': 7 * 86400, 'D': 86400, 'H': 3600, 'm': 60, 'x': 0}
+	mins := map[byte]int64{'Y': 365 * 86400, 'M': 28 * 86400, 'W': 7 * 86400, 'D': 86400, 'H': 3600, 'm': 60, 'x': 0}
 	for u, want := range mins {
 		if got := unitMinSeconds(u); got != want {
 			t.Errorf("unitMinSeconds(%q) = %d, want %d", string(u), got, want)
@@ -98,15 +98,6 @@ func TestParseBranchBlank(t *testing.T) {
 	// parse() guards blank branches; parseBranch's own contract still rejects them.
 	if _, err := parseBranch("  ", 0); err == nil {
 		t.Error("parseBranch(blank) = nil error, want error")
-	}
-}
-
-func TestSingleValueOfMissingSelector(t *testing.T) {
-	// present-but-no-selector cannot arise from parse(); the helper's contract
-	// is "not a single value".
-	b := &branch{present: map[designator]bool{desY: true}}
-	if v, ok := singleValueOf(b, desY); ok || v != 0 {
-		t.Errorf("singleValueOf = (%d, %v), want (0, false)", v, ok)
 	}
 }
 

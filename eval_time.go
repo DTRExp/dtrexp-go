@@ -118,43 +118,38 @@ func (c *cadence) coversCalendar(t time.Time, loc *time.Location) bool {
 }
 
 // occStart returns the naive start of occurrence k (k >= 0), constrained per
-// spec §9.2 for month/year periods. Calendar periods only.
+// spec §9.2 for month/year periods. Calendar periods only. A count may be as
+// large as 2³¹ − 1 (spec §8), so the offsets are int64: whole seconds for
+// D/W (naive space has no transitions, so a day is always 86,400 seconds)
+// and months for M/Y.
 func (c *cadence) occStart(k int) time.Time {
 	a := c.anchor
 	switch c.periodUnit {
-	case 'D':
-		return civilShiftDays(a, k*c.period)
-	case 'W':
-		return civilShiftDays(a, k*c.period*7)
+	case 'D', 'W':
+		return time.Unix(c.anchorNaive().Unix()+int64(k)*absoluteSeconds(c.period, c.periodUnit), 0).UTC()
 	case 'M':
-		return constrainAddMonths(a.year, a.month, a.day, a.hour, a.minute, a.second, k*c.period)
+		return constrainAddMonths(a.year, a.month, a.day, a.hour, a.minute, a.second, int64(k)*int64(c.period))
 	case 'Y':
-		return constrainAddMonths(a.year, a.month, a.day, a.hour, a.minute, a.second, k*c.period*12)
+		return constrainAddMonths(a.year, a.month, a.day, a.hour, a.minute, a.second, int64(k)*int64(c.period)*12)
 	}
 	return time.Time{}
 }
 
 // occEnd returns the exclusive naive end of an occurrence, measured from the
 // (already constrained) start. H/m durations under calendar periods are
-// local-clock units — "the same arithmetic" as the window they extend.
+// local-clock units — "the same arithmetic" as the window they extend. The
+// fixed units add int64 seconds, never a time.Duration, which overflows past
+// ~292 years.
 func (c *cadence) occEnd(start time.Time) time.Time {
 	switch c.durationUnit {
-	case 'H':
-		return start.Add(time.Duration(c.duration) * time.Hour)
-	case 'm':
-		return start.Add(time.Duration(c.duration) * time.Minute)
-	case 'D':
-		return time.Date(start.Year(), start.Month(), start.Day()+c.duration,
-			start.Hour(), start.Minute(), start.Second(), 0, time.UTC)
-	case 'W':
-		return time.Date(start.Year(), start.Month(), start.Day()+c.duration*7,
-			start.Hour(), start.Minute(), start.Second(), 0, time.UTC)
+	case 'H', 'm', 'D', 'W':
+		return time.Unix(start.Unix()+absoluteSeconds(c.duration, c.durationUnit), 0).UTC()
 	case 'M':
 		return constrainAddMonths(start.Year(), int(start.Month()), start.Day(),
-			start.Hour(), start.Minute(), start.Second(), c.duration)
+			start.Hour(), start.Minute(), start.Second(), int64(c.duration))
 	case 'Y':
 		return constrainAddMonths(start.Year(), int(start.Month()), start.Day(),
-			start.Hour(), start.Minute(), start.Second(), c.duration*12)
+			start.Hour(), start.Minute(), start.Second(), int64(c.duration)*12)
 	}
 	return start
 }
@@ -166,10 +161,8 @@ func (c *cadence) estimateIndex(tn time.Time) int {
 	// a clamped estimate strands the ±2 occurrence scan far below the
 	// true index. Both operands are whole-second naive UTC stamps, so
 	// second math is exact (same reasoning as coversAbsolute).
-	case 'D':
-		return int((tn.Unix()-c.anchorNaive().Unix())/86400) / c.period
-	case 'W':
-		return int((tn.Unix()-c.anchorNaive().Unix())/86400) / (c.period * 7)
+	case 'D', 'W':
+		return int((tn.Unix() - c.anchorNaive().Unix()) / absoluteSeconds(c.period, c.periodUnit))
 	case 'M':
 		months := (tn.Year()-c.anchor.year)*12 + (int(tn.Month()) - c.anchor.month)
 		return months / c.period
@@ -179,19 +172,13 @@ func (c *cadence) estimateIndex(tn time.Time) int {
 	return 0
 }
 
-// civilShiftDays adds days to a date literal in naive space — a pure calendar
-// step regardless of what any zone's clocks did.
-func civilShiftDays(a dateLit, days int) time.Time {
-	return time.Date(a.year, time.Month(a.month), a.day+days,
-		a.hour, a.minute, a.second, 0, time.UTC)
-}
-
 // constrainAddMonths adds months to y-m-d, clamping the day to the target
-// month's last valid day (Temporal 'constrain').
-func constrainAddMonths(y, m, d, hh, mm, ss, months int) time.Time {
-	total := (m - 1) + months
-	ty := y + floorDiv(total, 12)
-	tm := floorMod(total, 12) + 1
+// month's last valid day (Temporal 'constrain'). months is int64: a count of
+// years times 12 outgrows 32 bits.
+func constrainAddMonths(y, m, d, hh, mm, ss int, months int64) time.Time {
+	total := int64(m-1) + months
+	ty := int(int64(y) + floorDiv(total, 12))
+	tm := int(floorMod(total, 12)) + 1
 	td := d
 	if dim := daysInMonth(ty, tm); td > dim {
 		td = dim
@@ -199,7 +186,7 @@ func constrainAddMonths(y, m, d, hh, mm, ss, months int) time.Time {
 	return time.Date(ty, time.Month(tm), td, hh, mm, ss, 0, time.UTC)
 }
 
-func floorDiv(a, b int) int {
+func floorDiv(a, b int64) int64 {
 	q := a / b
 	if (a%b != 0) && ((a < 0) != (b < 0)) {
 		q--
@@ -207,7 +194,7 @@ func floorDiv(a, b int) int {
 	return q
 }
 
-func floorMod(a, b int) int {
+func floorMod(a, b int64) int64 {
 	return a - floorDiv(a, b)*b
 }
 

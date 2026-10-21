@@ -1,9 +1,6 @@
 package dtrexp
 
-import (
-	"strconv"
-	"strings"
-)
+import "strings"
 
 type domSpec struct {
 	minV, maxV, size int
@@ -13,7 +10,9 @@ type domSpec struct {
 func domainSpec(des, scope designator) domSpec {
 	switch des {
 	case desY:
-		return domSpec{unbounded: true}
+		// the year domain is 1–9999 (spec §3.1); unbounded marks that Y has
+		// no parent instance to count back from, wrap around or bound a stride
+		return domSpec{minV: 1, maxV: 9999, size: 9999, unbounded: true}
 	case desQ:
 		return domSpec{minV: 1, maxV: 4, size: 4}
 	case desM:
@@ -48,10 +47,13 @@ func buildSelector(des, scope designator, vp string, at int) (*selector, error) 
 	spec := domainSpec(des, scope)
 	s := &selector{des: des, scope: scope}
 
-	// Bare '*' -> whole domain.
+	// Bare '*' -> whole domain; nothing may follow it but a range's ':'.
 	if vp == "*" {
 		s.terms = []term{{kind: termRange, start: endpoint{star: true}, end: endpoint{star: true}}}
 		return s, nil
+	}
+	if strings.HasPrefix(vp, "*,") {
+		return nil, errAt(at+1, "a list cannot follow %q — it is already the whole domain", "*")
 	}
 
 	// Exclusion: '!' only immediately after the designator.
@@ -104,15 +106,14 @@ func buildSelector(des, scope designator, vp string, at int) (*selector, error) 
 }
 
 // parseValueList parses a comma-separated value list; at is the offset of s in
-// the full source.
+// the full source. A bare '*' is no list item, in a list or after '!' ('M!*'),
+// while '*:*' is a range (spec §3).
 func parseValueList(des designator, spec domSpec, s string, at int) ([]term, error) {
-	items := strings.Split(s, ",")
-	multi := len(items) > 1
 	var terms []term
 	off := at
-	for _, it := range items {
-		if multi && it == "*" {
-			return nil, errAt(off, "bare %q in a list — the list is already the whole domain", "*")
+	for _, it := range strings.Split(s, ",") {
+		if it == "*" {
+			return nil, errAt(off, "bare %q is not a list item — write the designator with %q for the whole domain", "*", "*")
 		}
 		t, err := parseItem(des, spec, it, off)
 		if err != nil {
@@ -128,9 +129,6 @@ func parseItem(des designator, spec domSpec, it string, at int) (term, error) {
 	if it == "" {
 		return term{}, errAt(at, "empty value item")
 	}
-	if it == "*" {
-		return term{kind: termRange, start: endpoint{star: true}, end: endpoint{star: true}}, nil
-	}
 	if strings.ContainsRune(it, ':') {
 		return parseRange(des, spec, it, at)
 	}
@@ -144,7 +142,7 @@ func parseItem(des designator, spec domSpec, it string, at int) (term, error) {
 func parseRange(des designator, spec domSpec, it string, at int) (term, error) {
 	parts := strings.Split(it, ":")
 	if len(parts) != 2 {
-		return term{}, errAt(at, "malformed range %q", it)
+		return term{}, errAt(at+len(parts[0])+1+len(parts[1]), "malformed range %q", it) // the second ':'
 	}
 	start, err := parseEndpoint(des, spec, parts[0], true, at)
 	if err != nil {
@@ -155,9 +153,10 @@ func parseRange(des designator, spec domSpec, it string, at int) (term, error) {
 		return term{}, err
 	}
 	wrapEligible := !start.star && !end.star && start.val >= 0 && end.val >= 0
-	// Y has no edge to wrap around: a backwards literal range is an error.
+	// Y has no edge to wrap around: a backwards literal range is an error,
+	// positioned at the end that cannot follow its start
 	if spec.unbounded && wrapEligible && start.val > end.val {
-		return term{}, errAt(at, "backwards range on Y — no edge to wrap around")
+		return term{}, errAt(at+len(parts[0])+1, "backwards range on Y — no edge to wrap around")
 	}
 	return term{kind: termRange, start: start, end: end, wrapEligible: wrapEligible}, nil
 }
@@ -168,9 +167,9 @@ func parseEndpoint(des designator, spec domSpec, s string, atStart bool, at int)
 	if s == "*" {
 		return endpoint{star: true}, nil
 	}
-	v, err := strconv.Atoi(s)
+	v, err := integerAt(s, at, "value")
 	if err != nil {
-		return endpoint{}, errAt(at, "invalid value %q", s)
+		return endpoint{}, err
 	}
 	// the sign requires a nonzero integer: '-0' is not a value (spec §3)
 	if v == 0 && strings.HasPrefix(s, "-") {
@@ -204,19 +203,19 @@ func parseOrdinal(des designator, spec domSpec, vp string, at int) (term, error)
 	}
 	parts := strings.Split(vp, "#")
 	if len(parts) != 2 {
-		return term{}, errAt(at, "malformed ordinal %q", vp)
+		return term{}, errAt(at+len(parts[0])+1+len(parts[1]), "malformed ordinal %q", vp) // the second '#'
 	}
 	base, err := parseEndpoint(des, spec, parts[0], true, at)
 	if err != nil {
 		return term{}, err
 	}
 	if base.star {
-		return term{}, errAt(at, "ordinal weekday must be a value")
+		return term{}, errAt(at+len(parts[0]), "ordinal weekday must be a value") // 'E*' is whole; the '#' cannot follow
 	}
 	ordPos := at + len(parts[0]) + 1
-	ord, err := strconv.Atoi(parts[1])
+	ord, err := integerAt(parts[1], ordPos, "ordinal")
 	if err != nil {
-		return term{}, errAt(ordPos, "invalid ordinal %q", parts[1])
+		return term{}, err
 	}
 	if ord == 0 {
 		return term{}, errAt(ordPos, "ordinal zero")
@@ -229,16 +228,19 @@ func parseOrdinal(des designator, spec domSpec, vp string, at int) (term, error)
 
 func parseStride(des, scope designator, spec domSpec, vp string, at int) (term, error) {
 	parts := strings.Split(vp, "/")
-	if len(parts) < 2 || len(parts) > 3 {
-		return term{}, errAt(at, "malformed stride %q", vp)
+	if len(parts) > 3 {
+		// the third '/'
+		return term{}, errAt(at+len(parts[0])+len(parts[1])+len(parts[2])+2, "malformed stride %q", vp)
 	}
 	base := parts[0]
+	// a stride its range or start does not allow is positioned at the '/'
+	slashPos := at + len(base)
 
 	var start, end endpoint
 	if strings.ContainsRune(base, ':') {
 		rp := strings.Split(base, ":")
 		if len(rp) != 2 {
-			return term{}, errAt(at, "malformed stride range %q", base)
+			return term{}, errAt(at+len(rp[0])+1+len(rp[1]), "malformed stride range %q", base) // the second ':'
 		}
 		s0, err := parseEndpoint(des, spec, rp[0], true, at)
 		if err != nil {
@@ -250,7 +252,7 @@ func parseStride(des, scope designator, spec domSpec, vp string, at int) (term, 
 		}
 		start, end = s0, e0
 		if !start.star && !end.star && start.val >= 0 && end.val >= 0 && start.val > end.val {
-			return term{}, errAt(at, "wrap ranges take no stride")
+			return term{}, errAt(slashPos, "wrap ranges take no stride")
 		}
 	} else {
 		s0, err := parseEndpoint(des, spec, base, true, at)
@@ -263,16 +265,16 @@ func parseStride(des, scope designator, spec domSpec, vp string, at int) (term, 
 
 	// The stride anchor (start) must be an explicit non-negative value.
 	if start.star {
-		return term{}, errAt(at, "anchorless stride — an explicit start is required")
+		return term{}, errAt(slashPos, "anchorless stride — an explicit start is required")
 	}
 	if start.val < 0 {
-		return term{}, errAt(at, "stride start must be non-negative")
+		return term{}, errAt(slashPos, "stride start must be non-negative")
 	}
 
-	ivalPos := at + len(parts[0]) + 1
-	interval, err := strconv.Atoi(parts[1])
+	ivalPos := slashPos + 1
+	interval, err := integerAt(parts[1], ivalPos, "stride interval")
 	if err != nil {
-		return term{}, errAt(ivalPos, "invalid stride interval %q", parts[1])
+		return term{}, err
 	}
 	if interval < 2 {
 		return term{}, errAt(ivalPos, "stride interval must be >= 2")
@@ -284,9 +286,9 @@ func parseStride(des, scope designator, spec domSpec, vp string, at int) (term, 
 	duration := 1
 	if len(parts) == 3 {
 		durPos := ivalPos + len(parts[1]) + 1
-		duration, err = strconv.Atoi(parts[2])
+		duration, err = integerAt(parts[2], durPos, "stride duration")
 		if err != nil {
-			return term{}, errAt(durPos, "invalid stride duration %q", parts[2])
+			return term{}, err
 		}
 		if duration < 1 || duration >= interval {
 			return term{}, errAt(durPos, "stride duration must satisfy 1 <= duration < interval")
@@ -318,7 +320,7 @@ func buildTimeSelector(vp string, at int) (*timeSelector, error) {
 		if strings.ContainsRune(it, ':') {
 			parts := strings.Split(it, ":")
 			if len(parts) != 2 {
-				return nil, errAt(off, "malformed T range %q", it)
+				return nil, errAt(off+len(parts[0])+1+len(parts[1]), "malformed T range %q", it) // the second ':'
 			}
 			if parts[0] == "*" {
 				return nil, errAt(off, "T takes no %q", "*")
@@ -330,12 +332,13 @@ func buildTimeSelector(vp string, at int) (*timeSelector, error) {
 			if err != nil {
 				return nil, err
 			}
-			endMs, _, err := parseTimeval(parts[1], true, off+len(parts[0])+1)
+			endPos := off + len(parts[0]) + 1
+			endMs, _, err := parseTimeval(parts[1], true, endPos)
 			if err != nil {
 				return nil, err
 			}
 			if startMs == endMs {
-				return nil, errAt(off, "T range with equal endpoints covers nothing")
+				return nil, errAt(endPos, "T range with equal endpoints covers nothing")
 			}
 			ts.ranges = append(ts.ranges, msRange{start: startMs, end: endMs, wrap: startMs > endMs})
 		} else {
@@ -356,14 +359,16 @@ func buildTimeSelector(vp string, at int) (*timeSelector, error) {
 // parseTimeval parses HH | HHMM | HHMMSS | HHMMSS.sss and returns the start
 // millisecond-of-day and the unit width (for single values). allowEnd permits
 // the special whole-day end value 2400; at is the offset of s in the full
-// source.
+// source. A '.' that cannot continue the value (it follows anything but six
+// digits, or three digits do not follow it) is the error, positioned at the
+// '.'.
 func parseTimeval(s string, allowEnd bool, at int) (ms int, unit int, err error) {
 	frac := ""
 	if dot := strings.IndexByte(s, '.'); dot >= 0 {
 		frac = s[dot+1:]
 		s = s[:dot]
-		if len(frac) != 3 || !allDigits(frac) {
-			return 0, 0, errAt(at+dot+1, "malformed millisecond in time value")
+		if len(s) != 6 || len(frac) != 3 || !allDigits(frac) {
+			return 0, 0, errAt(at+dot, "milliseconds follow only a 6-digit hhmmss time value")
 		}
 	}
 	if !allDigits(s) {
@@ -376,14 +381,13 @@ func parseTimeval(s string, allowEnd bool, at int) (ms int, unit int, err error)
 
 	switch len(s) {
 	case 2: // HH
-		hh, _ := strconv.Atoi(s)
+		hh := digitsValue(s)
 		if hh > 23 {
 			return 0, 0, errAt(at, "hour out of range in time value")
 		}
 		return hh * 3600000, 3600000, nil
 	case 4: // HHMM
-		hh, _ := strconv.Atoi(s[0:2])
-		mm, _ := strconv.Atoi(s[2:4])
+		hh, mm := digitsValue(s[0:2]), digitsValue(s[2:4])
 		if hh > 23 {
 			return 0, 0, errAt(at, "hour out of range in time value")
 		}
@@ -392,9 +396,7 @@ func parseTimeval(s string, allowEnd bool, at int) (ms int, unit int, err error)
 		}
 		return hh*3600000 + mm*60000, 60000, nil
 	case 6: // HHMMSS[.sss]
-		hh, _ := strconv.Atoi(s[0:2])
-		mm, _ := strconv.Atoi(s[2:4])
-		ssv, _ := strconv.Atoi(s[4:6])
+		hh, mm, ssv := digitsValue(s[0:2]), digitsValue(s[2:4]), digitsValue(s[4:6])
 		if hh > 23 {
 			return 0, 0, errAt(at, "hour out of range in time value")
 		}
@@ -406,12 +408,25 @@ func parseTimeval(s string, allowEnd bool, at int) (ms int, unit int, err error)
 		}
 		base := hh*3600000 + mm*60000 + ssv*1000
 		if frac != "" {
-			f, _ := strconv.Atoi(frac)
-			return base + f, 1, nil
+			return base + digitsValue(frac), 1, nil
 		}
 		return base, 1000, nil
 	}
 	return 0, 0, errAt(at, "malformed time value %q", s)
+}
+
+// integerAt parses s, the token at offset at, as an integer; what names the
+// token in the error for a malformed one. An integer above maxInteger is an
+// error at the same offset.
+func integerAt(s string, at int, what string) (int, error) {
+	v, ok, over := parseInteger(s)
+	if over {
+		return 0, errAt(at, "integer above %d", maxInteger)
+	}
+	if !ok {
+		return 0, errAt(at, "invalid %s %q", what, s)
+	}
+	return v, nil
 }
 
 func allDigits(s string) bool {

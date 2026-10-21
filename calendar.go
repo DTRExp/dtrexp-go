@@ -98,9 +98,11 @@ func weeksInISOYear(wy int) int {
 	return wk
 }
 
-// validCivilDate reports whether y-m-d is a real calendar date.
+// validCivilDate reports whether y-m-d is a real calendar date in years
+// 1–9999 (a date literal's four digits cannot exceed 9999; year 0 is outside
+// the domain, spec §3.1).
 func validCivilDate(y, m, d int) bool {
-	if m < 1 || m > 12 {
+	if y < 1 || m < 1 || m > 12 {
 		return false
 	}
 	return d >= 1 && d <= daysInMonth(y, m)
