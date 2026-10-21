@@ -1624,6 +1624,191 @@
       "expression": "20200101/1Y/12M",
       "reason": "different units compare conservatively: 12 months may reach 372 days, a year may be 365",
       "position": 12
+    },
+    {
+      "expression": " ",
+      "reason": "spaces only — the expression is missing at the end of the input",
+      "position": 1
+    },
+    {
+      "expression": "M3.0",
+      "reason": "a fraction belongs only to a 6-digit T value",
+      "position": 2
+    },
+    {
+      "expression": "M3: 5",
+      "reason": "no space inside a range",
+      "position": 3
+    },
+    {
+      "expression": "M-",
+      "reason": "a sign needs an integer",
+      "position": 2
+    },
+    {
+      "expression": "M--1",
+      "reason": "one sign only",
+      "position": 2
+    },
+    {
+      "expression": "M-*",
+      "reason": "a sign needs an integer",
+      "position": 2
+    },
+    {
+      "expression": "M*-1",
+      "reason": "nothing may follow a bare '*' but a new component",
+      "position": 2
+    },
+    {
+      "expression": "M**",
+      "reason": "the second '*' starts bounds, which need ':' and a date",
+      "position": 3
+    },
+    {
+      "expression": "M!3!",
+      "reason": "'!' only directly after a designator",
+      "position": 3
+    },
+    {
+      "expression": "E1#1,2",
+      "reason": "an ordinal is single, never in a list",
+      "position": 4
+    },
+    {
+      "expression": "E1,2#1",
+      "reason": "an ordinal takes a single value",
+      "position": 4
+    },
+    {
+      "expression": "E1:2#1",
+      "reason": "an ordinal takes a single value",
+      "position": 4
+    },
+    {
+      "expression": "E1#1/2",
+      "reason": "an ordinal takes no stride",
+      "position": 4
+    },
+    {
+      "expression": "E1/2#1",
+      "reason": "a stride takes no ordinal",
+      "position": 4
+    },
+    {
+      "expression": "E1#-",
+      "reason": "a sign needs an integer",
+      "position": 4
+    },
+    {
+      "expression": "T090",
+      "reason": "a time value is 2, 4 or 6 digits",
+      "position": 1
+    },
+    {
+      "expression": "T09000",
+      "reason": "a time value is 2, 4 or 6 digits",
+      "position": 1
+    },
+    {
+      "expression": "T0900-1000",
+      "reason": "T ranges use ':'",
+      "position": 5
+    },
+    {
+      "expression": "T090000.5",
+      "reason": "a fraction is '.' and exactly 3 digits",
+      "position": 7
+    },
+    {
+      "expression": "T090000.5000",
+      "reason": "a fraction is '.' and exactly 3 digits",
+      "position": 7
+    },
+    {
+      "expression": "20240101T12345",
+      "reason": "a date literal's time is hhmm or hhmmss",
+      "position": 0
+    },
+    {
+      "expression": "20240101T1234567",
+      "reason": "a date literal's time is hhmm or hhmmss",
+      "position": 0
+    },
+    {
+      "expression": " | ",
+      "reason": "empty union branch",
+      "position": 1
+    },
+    {
+      "expression": "M3 | | M5",
+      "reason": "empty union branch",
+      "position": 5
+    },
+    {
+      "expression": "M3 |  | M5",
+      "reason": "empty union branch",
+      "position": 6
+    },
+    {
+      "expression": "M11:2/1",
+      "reason": "a wrap range takes no stride — the earliest failing rule wins",
+      "position": 5
+    },
+    {
+      "expression": "Y2020:2019/2",
+      "reason": "Y ranges never wrap — the end is before the start",
+      "position": 6
+    },
+    {
+      "expression": "20200101T120020200102/10D",
+      "reason": "a date literal is never followed by another digit",
+      "position": 0
+    },
+    {
+      "expression": "M13 X",
+      "reason": "the earliest error wins, a later grammar error included",
+      "position": 1
+    },
+    {
+      "expression": "M13 M1",
+      "reason": "the value is out of domain before the repeated designator",
+      "position": 1
+    },
+    {
+      "expression": "M3/14 X",
+      "reason": "the stride interval exceeds the domain before the stray character",
+      "position": 3
+    },
+    {
+      "expression": "Y0 M",
+      "reason": "the year is out of domain before the missing value",
+      "position": 1
+    },
+    {
+      "expression": "T0900:0900 %",
+      "reason": "the empty T range comes before the stray character",
+      "position": 6
+    },
+    {
+      "expression": "M0 |",
+      "reason": "the value is out of domain before the empty branch",
+      "position": 1
+    },
+    {
+      "expression": "E7#6 E1",
+      "reason": "the ordinal is out of range before the repeated designator",
+      "position": 3
+    },
+    {
+      "expression": "D40 X",
+      "reason": "a D value's domain waits for the branch, so the earlier grammar error wins",
+      "position": 4
+    },
+    {
+      "expression": "D40 M13",
+      "reason": "with the branch complete, D40 is out of the month domain, the earliest error",
+      "position": 1
     }
   ],
   "warnings": [

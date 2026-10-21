@@ -17,9 +17,9 @@ func TestParseErrors(t *testing.T) {
 		pos  int    // expected ParseError.Pos
 	}{
 		// boundary killers: index-0 markers, position arithmetic, duration floor
-		{"M!/3", "exclusion cannot carry a stride or ordinal", 2},
-		{"M!#2", "exclusion cannot carry a stride or ordinal", 2},
-		{"M/3", `invalid value ""`, 1},
+		{"M!/3", "expected a value", 2},
+		{"M!#2", "expected a value", 2},
+		{"M/3", "expected a value", 1},
 		{"T/2", "T takes no stride", 1},
 		{"T#1", "T takes no ordinal", 1},
 		{"T0900!1200", "T takes no exclusion", 5},
@@ -42,7 +42,7 @@ func TestParseErrors(t *testing.T) {
 		{"M3\rD5", "unexpected character", 2},
 		{"\t", "unexpected character", 0},
 		{"M1 |\t", "unexpected character", 4},
-		{"   ", "empty expression", 0},
+		{"   ", "empty expression", 3}, // past the spaces, where a component was required
 		// union branches
 		{"|M1", "empty union branch", 0},
 		{"M1 |", "empty union branch", 4},
@@ -54,10 +54,10 @@ func TestParseErrors(t *testing.T) {
 		{"20200101T2360", "invalid time in date literal", 0},
 		{"20200101T235960", "invalid time in date literal", 0},
 		{"20200101T12", "malformed time-part", 0},
-		{"20200101T12000", "too many digits", 0}, // 5 digits: neither hhmm nor hhmmss
-		{"20200101T1200001", "too many digits", 0},
-		{"202001011/1D", "too many digits", 0},
-		{"20200101:202001021", "too many digits", 9},
+		{"20200101T12000", "malformed time-part", 0}, // 5 digits: neither hhmm nor hhmmss
+		{"20200101T1200001", "malformed time-part", 0},
+		{"202001011/1D", "exactly 8 digits", 0},
+		{"20200101:202001021", "exactly 8 digits", 9},
 		{"00000101:*", "not a real calendar date", 0}, // year 0 is outside 1–9999
 		{"20240101T1800:20240101T175959", "backwards bounds range", 14},
 		{"20201301", "not a real calendar date", 0},
@@ -86,40 +86,45 @@ func TestParseErrors(t *testing.T) {
 		{"M!1/2", "stride or ordinal", 3},
 		{"M!1#2", "stride or ordinal", 3},
 		{"M!99", "out of domain", 2},
-		{"M1,", "empty value item", 3},
+		{"M1,13", "out of domain", 3}, // a later list item, at its own offset
+		{"M10,13", "out of domain", 4},
+		{"M1,", "expected a value", 3},
 		{"M*,1", "a list cannot follow", 2}, // 'M*' is whole; the ',' cannot follow
 		{"M1,*", "bare", 3},
 		{"M!*,1", "bare", 2},
 		// ranges
-		{"M1:2:3", "malformed range", 4}, // the second ':'
-		{"M10:20:3", "malformed range", 6},
+		{"M1:2:3", "unexpected character", 4}, // the second ':'
+		{"M10:12:3", "unexpected character", 6},
 		{"M99:2", "out of domain", 1},
 		{"M1:99", "out of domain", 3},
-		{"Y2024:2020", "backwards range on Y", 6}, // the end that cannot follow its start
-		{"Y0", "out of domain", 1},                // zero is out of domain, not "negative"
-		{"M-", "invalid value", 1},
+		{"Y2024:2020", "backwards range on Y", 6},       // the end that cannot follow its start
+		{"Y0", "out of domain", 1},                      // zero is out of domain, not "negative"
+		{"M-", "expected an integer after the sign", 2}, // the end, where the integer was required
 		// ordinals
 		{"M1#2", "only valid on E", 2},
-		{"E1#2#3", "malformed ordinal", 4},
-		{"E1#22#3", "malformed ordinal", 5},
+		{"E1#2#3", "unexpected character", 4},
+		{"E1#-2#3", "unexpected character", 5},
 		{"E9#2", "out of domain", 1},
 		{"E*#2", "ordinal weekday must be a value", 2},
-		{"E1#", "invalid ordinal", 3},
+		{"E1#", "expected an ordinal", 3},
 		// strides
-		{"M1/2/3/4", "malformed stride", 6}, // the third '/'
-		{"M10/20/30/4", "malformed stride", 9},
+		{"M1/3/2/4", "unexpected character", 6}, // the third '/'
+		{"M10/12/11/4", "unexpected character", 9},
 		{"M1,2/2", "stride not allowed on a list", 4},
-		{"M1:2:3/2", "malformed stride range", 4},
-		{"M1:20:3/2", "malformed stride range", 5},
+		{"M1:2:3/2", "unexpected character", 4},
+		{"M1:12:3/2", "unexpected character", 5},
 		{"M99:5/2", "out of domain", 1},
 		{"M1:99/2", "out of domain", 3},
 		{"M10:2/2", "wrap ranges take no stride", 5}, // the '/'
+		{"M11:2/1", "wrap ranges take no stride", 5}, // before its interval
+		{"Y2030:2020/1", "backwards range on Y", 6},  // the end, before the stride
+		{"M3 M-", "duplicate designator", 3},         // before the value that follows it
 		{"H5:0/2", "wrap ranges take no stride", 4},  // zero end is still a wrap
 		{"Y*:2020/2", "anchorless stride", 7},
 		{"D-3/2", "stride start must be non-negative", 3},
 		{"M99/2", "out of domain", 1},
-		{"M1/", "invalid stride interval", 3},
-		{"M1/3/", "invalid stride duration", 5},
+		{"M1/", "expected a stride interval", 3},
+		{"M1/3/", "expected a stride duration", 5},
 		// T selector
 		{"T12#1", "no ordinal", 3},
 		{"T!12", "no exclusion", 1},
@@ -131,16 +136,59 @@ func TestParseErrors(t *testing.T) {
 		{"T*:12", `no "*"`, 1},
 		{"T12:*", `no "*"`, 4},
 		{"T120000.12", "milliseconds follow only", 7}, // the '.', not three digits after it
-		{"T.12", "milliseconds follow only", 1},
+		{"T.12", "expected a time value", 1},
 		{"T12.500", "milliseconds follow only", 3},
-		{"T12000.500", "milliseconds follow only", 6},
+		{"T12000.500", "malformed time value", 1},
 		{"T1200:1201.000", "milliseconds follow only", 10},
-		{"T-2", "malformed time value", 1},
+		{"T-2", "requires a value", 1},
+		{"T:12", "expected a time value", 1},
+		{"T120000.1.2", "milliseconds follow only", 7}, // a fraction of three characters, not three digits
 		{"T126000", "minute out of range", 1},
 		{"T120060", "second out of range", 1},
 		{"T123", "malformed time value", 1},
-		{"T.500", "milliseconds follow only", 1},
-		{"T1200:12", "equal endpoints", 6}, // the range end
+		{"T.500", "expected a time value", 1},
+		{"T0900:", "expected a time value", 6}, // the end, where the range end was required
+		{"20200101:", "8 digits", 9},
+		{"20200101:x", "8 digits", 9},
+		{"*:x", "8 digits", 2},
+		// the earliest error wins: a rule error reads on to the end of its branch (spec §8)
+		{"M13,X", "out of domain", 1}, // before the selector is complete
+		{"Y2020:2019,X", "backwards range on Y", 6},
+		{"M-0 X", "'-0' is not a value", 1},
+		{"E7#0 X", "ordinal zero", 3},
+		{"M1/1 X", "stride interval must be >= 2", 3},
+		{"H22:0/2 X", "wrap ranges take no stride", 5},
+		{"T25 X", "hour out of range", 1},
+		{"T0900:0900,X", "equal endpoints", 6},
+		{"T090000.5 X", "milliseconds follow only", 7},
+		{"20230229 X", "not a real calendar date", 0},
+		{"20200101T2400 X", "invalid time in date literal", 0},
+		{"2020010 X", "exactly 8 digits", 0},
+		{"20200101T09 X", "malformed time-part", 0},
+		{"20200101/0D X", "zero cadence period", 9},
+		{"20200101/2D/3D X", "duration must be < period", 12},
+		{"20200101/2147483648D X", "integer above", 9},
+		{"20180301:20170301 X", "backwards bounds range", 9},
+		{"20200101 20200102 X", "more than one bounds", 9},
+		{"20200101 *:20200102 X", "more than one bounds", 9},
+		{"20200101 20200102:* X", "more than one bounds", 9},
+		{"20200101/2D 20200101/2D X", "more than one cadence", 12},
+		{"M1 M2 X", "duplicate designator", 3},
+		// D's domain waits for its scope: a grammar error first wins, a complete branch competes
+		{"D40 M3/1", "out of domain", 1},
+		{"D40 20230229", "out of domain", 1},
+		{"D2/40 X", "unknown designator", 6},
+		{"D2/40 M1", "exceeds parent domain", 3},
+		{"D40/2", "out of domain", 1},
+		{"D1:40/2 M1", "out of domain", 3},
+		{"D!40", "out of domain", 2},
+		{"D1,40", "out of domain", 3},
+		{"D10,40", "out of domain", 4},
+		{"D1:40 Q1 M13", "out of domain", 3},
+		{"D0 X", "unknown designator", 3},   // even where no scope could hold the value
+		{"D-0 X", "'-0' is not a value", 1}, // no value in any domain, so it does not wait
+		{"D40 M*5", "out of domain", 1},     // the '*' completes M, and the 5 is a malformed date literal
+		{"T1200:12", "equal endpoints", 6},  // the range end
 		// exclusions take a value list
 		{"M!*", "bare", 2},
 		{"T09 M!*", "bare", 6},
@@ -204,6 +252,10 @@ func TestParseValid(t *testing.T) {
 		"Y2020:*/10000000", "Y1:*/10000001", "E7#-0000000001",
 		"20200101/2147483647D/2147483646D", "20200101/2147483647m",
 		"M!*:*",
+		"D1/31", // a D stride interval equal to its domain
+		// a value part ends where its grammar does, so a component may follow
+		// it with the space elided
+		"M**:20240101", "M3*:20240101", "M1:3*:20240101", "E1#2M3", "M1/3/2D5",
 	}
 	for _, expr := range valid {
 		if _, err := Parse(expr); err != nil {

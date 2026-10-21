@@ -40,82 +40,56 @@ func domainSpec(des, scope designator) domSpec {
 	return domSpec{}
 }
 
-// buildSelector builds an integer-field selector from its value part vp; at is
-// the offset of vp in the full source, from which every error position within
-// the value part is derived.
+// buildSelector builds an integer-field selector from its value part vp, which
+// readSelectorValue has read by the grammar and checked by every rule but D's
+// domain. That depends on scope, known once the branch is complete, so D's
+// values and stride interval are checked here, the first error returned; at is
+// the offset of vp in the full source.
 func buildSelector(des, scope designator, vp string, at int) (*selector, error) {
-	spec := domainSpec(des, scope)
 	s := &selector{des: des, scope: scope}
+	b := termBuilder{des: des, spec: domainSpec(des, scope)}
 
-	// Bare '*' -> whole domain; nothing may follow it but a range's ':'.
+	// Bare '*' -> whole domain.
 	if vp == "*" {
 		s.terms = []term{{kind: termRange, start: endpoint{star: true}, end: endpoint{star: true}}}
 		return s, nil
 	}
-	if strings.HasPrefix(vp, "*,") {
-		return nil, errAt(at+1, "a list cannot follow %q — it is already the whole domain", "*")
-	}
 
-	// Exclusion: '!' only immediately after the designator.
-	if idx := strings.IndexByte(vp, '!'); idx >= 0 {
-		if idx != 0 {
-			return nil, errAt(at+idx, "exclusion %q allowed only immediately after the designator", "!")
-		}
-		body := vp[1:]
-		if bad := strings.IndexAny(body, "/#"); bad >= 0 {
-			return nil, errAt(at+1+bad, "exclusion cannot carry a stride or ordinal")
-		}
-		terms, err := parseValueList(des, spec, body, at+1)
-		if err != nil {
-			return nil, err
-		}
+	var err error
+	switch {
+	case vp[0] == '!': // exclusion: '!' immediately after the designator, before a value list
 		s.exclude = true
-		s.terms = terms
-		return s, nil
-	}
-
-	// Ordinal (E only).
-	if strings.ContainsRune(vp, '#') {
-		t, err := parseOrdinal(des, spec, vp, at)
-		if err != nil {
-			return nil, err
-		}
+		s.terms, err = b.list(vp[1:], at+1)
+	case strings.ContainsRune(vp, '#'): // ordinal (E only)
+		head, tail, _ := strings.Cut(vp, "#")
+		ord, _ := parseInteger(tail)
+		s.terms = []term{{kind: termOrdinal, start: b.endpoint(head), ordinal: ord}}
+	case strings.ContainsRune(vp, '/'): // stride
+		var t term
+		t, err = b.stride(vp, at)
 		s.terms = []term{t}
-		return s, nil
+	default:
+		s.terms, err = b.list(vp, at)
 	}
-
-	// Stride.
-	if idx := strings.IndexByte(vp, '/'); idx >= 0 {
-		if strings.ContainsRune(vp, ',') {
-			return nil, errAt(at+idx, "stride not allowed on a list")
-		}
-		t, err := parseStride(des, scope, spec, vp, at)
-		if err != nil {
-			return nil, err
-		}
-		s.terms = []term{t}
-		return s, nil
-	}
-
-	terms, err := parseValueList(des, spec, vp, at)
 	if err != nil {
 		return nil, err
 	}
-	s.terms = terms
 	return s, nil
 }
 
-// parseValueList parses a comma-separated value list; at is the offset of s in
-// the full source. A bare '*' is no list item, in a list or after '!' ('M!*'),
-// while '*:*' is a range (spec §3).
-func parseValueList(des designator, spec domSpec, s string, at int) ([]term, error) {
+// termBuilder builds one selector's terms; spec is its domain.
+type termBuilder struct {
+	des  designator
+	spec domSpec
+}
+
+// list builds a comma-separated value list; at is the offset of s in the full
+// source.
+func (b termBuilder) list(s string, at int) ([]term, error) {
 	var terms []term
 	off := at
 	for _, it := range strings.Split(s, ",") {
-		if it == "*" {
-			return nil, errAt(off, "bare %q is not a list item — write the designator with %q for the whole domain", "*", "*")
-		}
-		t, err := parseItem(des, spec, it, off)
+		t, err := b.item(it, off)
 		if err != nil {
 			return nil, err
 		}
@@ -125,183 +99,100 @@ func parseValueList(des designator, spec domSpec, s string, at int) ([]term, err
 	return terms, nil
 }
 
-func parseItem(des designator, spec domSpec, it string, at int) (term, error) {
-	if it == "" {
-		return term{}, errAt(at, "empty value item")
-	}
-	if strings.ContainsRune(it, ':') {
-		return parseRange(des, spec, it, at)
-	}
-	ep, err := parseEndpoint(des, spec, it, true, at)
-	if err != nil {
+// item builds a value or a range; at is the offset of it in the full source.
+func (b termBuilder) item(it string, at int) (term, error) {
+	head, tail, isRange := strings.Cut(it, ":")
+	if err := b.checkDay(head, at); err != nil {
 		return term{}, err
 	}
-	return term{kind: termSingle, start: ep}, nil
-}
-
-func parseRange(des designator, spec domSpec, it string, at int) (term, error) {
-	parts := strings.Split(it, ":")
-	if len(parts) != 2 {
-		return term{}, errAt(at+len(parts[0])+1+len(parts[1]), "malformed range %q", it) // the second ':'
+	start := b.endpoint(head)
+	if !isRange {
+		return term{kind: termSingle, start: start}, nil
 	}
-	start, err := parseEndpoint(des, spec, parts[0], true, at)
-	if err != nil {
+	if err := b.checkDay(tail, at+len(head)+1); err != nil {
 		return term{}, err
 	}
-	end, err := parseEndpoint(des, spec, parts[1], false, at+len(parts[0])+1)
-	if err != nil {
-		return term{}, err
-	}
+	end := b.endpoint(tail)
 	wrapEligible := !start.star && !end.star && start.val >= 0 && end.val >= 0
-	// Y has no edge to wrap around: a backwards literal range is an error,
-	// positioned at the end that cannot follow its start
-	if spec.unbounded && wrapEligible && start.val > end.val {
-		return term{}, errAt(at+len(parts[0])+1, "backwards range on Y — no edge to wrap around")
-	}
 	return term{kind: termRange, start: start, end: end, wrapEligible: wrapEligible}, nil
 }
 
-// parseEndpoint parses a single value/'*' with domain validation; at is the
-// offset of s in the full source.
-func parseEndpoint(des designator, spec domSpec, s string, atStart bool, at int) (endpoint, error) {
+// stride builds a stride term; at is the offset of vp in the full source.
+func (b termBuilder) stride(vp string, at int) (term, error) {
+	parts := strings.Split(vp, "/")
+	base := parts[0]
+	head, tail, isRange := strings.Cut(base, ":")
+	if err := b.checkDay(head, at); err != nil {
+		return term{}, err
+	}
+	start := b.endpoint(head)
+	end := endpoint{star: true} // default end: domain edge
+	if isRange {
+		if err := b.checkDay(tail, at+len(head)+1); err != nil {
+			return term{}, err
+		}
+		end = b.endpoint(tail)
+	}
+	interval, _ := parseInteger(parts[1])
+	if b.des == desD && interval > b.spec.size {
+		return term{}, errAt(at+len(base)+1, "stride interval %d exceeds parent domain — use a cadence", interval)
+	}
+	duration := 1
+	if len(parts) == 3 {
+		duration, _ = parseInteger(parts[2])
+	}
+	return term{kind: termStride, start: start, end: end, interval: interval, duration: duration}, nil
+}
+
+// endpoint is the value or '*' of the token s.
+func (b termBuilder) endpoint(s string) endpoint {
 	if s == "*" {
-		return endpoint{star: true}, nil
+		return endpoint{star: true}
 	}
-	v, err := integerAt(s, at, "value")
-	if err != nil {
-		return endpoint{}, err
+	v, _ := parseInteger(s)
+	return endpoint{val: v}
+}
+
+// checkDay checks a D value's domain, which its scope sets; the token s is at
+// at. Every other domain is checked as the value is read.
+func (b termBuilder) checkDay(s string, at int) error {
+	if b.des != desD || s == "*" {
+		return nil
 	}
-	// the sign requires a nonzero integer: '-0' is not a value (spec §3)
-	if v == 0 && strings.HasPrefix(s, "-") {
-		return endpoint{}, errAt(at, "'-0' is not a value")
-	}
+	v, _ := parseInteger(s)
+	return checkDomain(b.des, b.spec, v, at)
+}
+
+// checkDomain reports a value v outside the domain spec of des, at at.
+func checkDomain(des designator, spec domSpec, v int, at int) error {
 	if spec.unbounded { // Y
 		if v < 0 {
-			return endpoint{}, errAt(at, "negative value on Y — no edge to count back from")
+			return errAt(at, "negative value on Y — no edge to count back from")
 		}
 		// Y takes 4-digit ISO years (spec §2): 1-9999.
 		if v < 1 || v > 9999 {
-			return endpoint{}, errAt(at, "year %d out of domain (1-9999)", v)
+			return errAt(at, "year %d out of domain (1-9999)", v)
 		}
-		return endpoint{val: v}, nil
+		return nil
 	}
 	if v < 0 {
 		if v < -spec.size {
-			return endpoint{}, errAt(at, "negative value %d out of domain for %q", v, string(des))
+			return errAt(at, "negative value %d out of domain for %q", v, string(des))
 		}
-		return endpoint{val: v}, nil
+		return nil
 	}
 	if v < spec.minV || v > spec.maxV {
-		return endpoint{}, errAt(at, "value %d out of domain for %q", v, string(des))
+		return errAt(at, "value %d out of domain for %q", v, string(des))
 	}
-	return endpoint{val: v}, nil
-}
-
-func parseOrdinal(des designator, spec domSpec, vp string, at int) (term, error) {
-	if des != desE {
-		return term{}, errAt(at+strings.IndexByte(vp, '#'), "ordinal %q only valid on E", "#")
-	}
-	parts := strings.Split(vp, "#")
-	if len(parts) != 2 {
-		return term{}, errAt(at+len(parts[0])+1+len(parts[1]), "malformed ordinal %q", vp) // the second '#'
-	}
-	base, err := parseEndpoint(des, spec, parts[0], true, at)
-	if err != nil {
-		return term{}, err
-	}
-	if base.star {
-		return term{}, errAt(at+len(parts[0]), "ordinal weekday must be a value") // 'E*' is whole; the '#' cannot follow
-	}
-	ordPos := at + len(parts[0]) + 1
-	ord, err := integerAt(parts[1], ordPos, "ordinal")
-	if err != nil {
-		return term{}, err
-	}
-	if ord == 0 {
-		return term{}, errAt(ordPos, "ordinal zero")
-	}
-	if ord < -5 || ord > 5 {
-		return term{}, errAt(ordPos, "ordinal %d out of range (-5..-1, 1..5)", ord)
-	}
-	return term{kind: termOrdinal, start: base, ordinal: ord}, nil
-}
-
-func parseStride(des, scope designator, spec domSpec, vp string, at int) (term, error) {
-	parts := strings.Split(vp, "/")
-	if len(parts) > 3 {
-		// the third '/'
-		return term{}, errAt(at+len(parts[0])+len(parts[1])+len(parts[2])+2, "malformed stride %q", vp)
-	}
-	base := parts[0]
-	// a stride its range or start does not allow is positioned at the '/'
-	slashPos := at + len(base)
-
-	var start, end endpoint
-	if strings.ContainsRune(base, ':') {
-		rp := strings.Split(base, ":")
-		if len(rp) != 2 {
-			return term{}, errAt(at+len(rp[0])+1+len(rp[1]), "malformed stride range %q", base) // the second ':'
-		}
-		s0, err := parseEndpoint(des, spec, rp[0], true, at)
-		if err != nil {
-			return term{}, err
-		}
-		e0, err := parseEndpoint(des, spec, rp[1], false, at+len(rp[0])+1)
-		if err != nil {
-			return term{}, err
-		}
-		start, end = s0, e0
-		if !start.star && !end.star && start.val >= 0 && end.val >= 0 && start.val > end.val {
-			return term{}, errAt(slashPos, "wrap ranges take no stride")
-		}
-	} else {
-		s0, err := parseEndpoint(des, spec, base, true, at)
-		if err != nil {
-			return term{}, err
-		}
-		start = s0
-		end = endpoint{star: true} // default end: domain edge
-	}
-
-	// The stride anchor (start) must be an explicit non-negative value.
-	if start.star {
-		return term{}, errAt(slashPos, "anchorless stride — an explicit start is required")
-	}
-	if start.val < 0 {
-		return term{}, errAt(slashPos, "stride start must be non-negative")
-	}
-
-	ivalPos := slashPos + 1
-	interval, err := integerAt(parts[1], ivalPos, "stride interval")
-	if err != nil {
-		return term{}, err
-	}
-	if interval < 2 {
-		return term{}, errAt(ivalPos, "stride interval must be >= 2")
-	}
-	if !spec.unbounded && interval > spec.size {
-		return term{}, errAt(ivalPos, "stride interval %d exceeds parent domain — use a cadence", interval)
-	}
-
-	duration := 1
-	if len(parts) == 3 {
-		durPos := ivalPos + len(parts[1]) + 1
-		duration, err = integerAt(parts[2], durPos, "stride duration")
-		if err != nil {
-			return term{}, err
-		}
-		if duration < 1 || duration >= interval {
-			return term{}, errAt(durPos, "stride duration must satisfy 1 <= duration < interval")
-		}
-	}
-	return term{kind: termStride, start: start, end: end, interval: interval, duration: duration}, nil
+	return nil
 }
 
 // --- Time selector ---------------------------------------------------------
 
 // buildTimeSelector builds the T component from its value part vp; at is the
-// offset of vp in the full source.
-func buildTimeSelector(vp string, at int) (*timeSelector, error) {
+// offset of vp in the full source. A token the grammar does not allow is the
+// error; a value the rules do not allow goes to note, and the build reads on.
+func buildTimeSelector(vp string, at int, note func(error)) (*timeSelector, error) {
 	if idx := strings.IndexByte(vp, '!'); idx >= 0 {
 		return nil, errAt(at+idx, "T takes no exclusion — write the complement explicitly")
 	}
@@ -328,27 +219,27 @@ func buildTimeSelector(vp string, at int) (*timeSelector, error) {
 			if parts[1] == "*" {
 				return nil, errAt(off+len(parts[0])+1, "T takes no %q", "*")
 			}
-			startMs, _, err := parseTimeval(parts[0], false, off)
-			if err != nil {
-				return nil, err
-			}
 			endPos := off + len(parts[0]) + 1
-			endMs, _, err := parseTimeval(parts[1], true, endPos)
-			if err != nil {
+			if err := expectTimeval(parts[0], off); err != nil {
 				return nil, err
 			}
+			if err := expectTimeval(parts[1], endPos); err != nil {
+				return nil, err
+			}
+			startMs, _ := parseTimeval(parts[0], false, off, note)
+			endMs, _ := parseTimeval(parts[1], true, endPos, note)
 			if startMs == endMs {
-				return nil, errAt(endPos, "T range with equal endpoints covers nothing")
+				note(errAt(endPos, "T range with equal endpoints covers nothing"))
 			}
 			ts.ranges = append(ts.ranges, msRange{start: startMs, end: endMs, wrap: startMs > endMs})
 		} else {
 			if it == "*" {
 				return nil, errAt(off, "T takes no %q", "*")
 			}
-			startMs, unit, err := parseTimeval(it, false, off)
-			if err != nil {
+			if err := expectTimeval(it, off); err != nil {
 				return nil, err
 			}
+			startMs, unit := parseTimeval(it, false, off, note)
 			ts.ranges = append(ts.ranges, msRange{start: startMs, end: startMs + unit, wrap: false})
 		}
 		off += len(it) + 1 // the item plus its trailing ','
@@ -356,83 +247,71 @@ func buildTimeSelector(vp string, at int) (*timeSelector, error) {
 	return ts, nil
 }
 
+// expectTimeval is the grammar error for a time value missing at at: an empty
+// item or range end, or a '.' with no digits before it.
+func expectTimeval(s string, at int) error {
+	if s == "" || s[0] == '.' {
+		return errAt(at, "expected a time value")
+	}
+	return nil
+}
+
 // parseTimeval parses HH | HHMM | HHMMSS | HHMMSS.sss and returns the start
 // millisecond-of-day and the unit width (for single values). allowEnd permits
 // the special whole-day end value 2400; at is the offset of s in the full
-// source. A '.' that cannot continue the value (it follows anything but six
-// digits, or three digits do not follow it) is the error, positioned at the
-// '.'.
-func parseTimeval(s string, allowEnd bool, at int) (ms int, unit int, err error) {
-	frac := ""
-	if dot := strings.IndexByte(s, '.'); dot >= 0 {
-		frac = s[dot+1:]
-		s = s[:dot]
-		if len(s) != 6 || len(frac) != 3 || !allDigits(frac) {
-			return 0, 0, errAt(at+dot, "milliseconds follow only a 6-digit hhmmss time value")
-		}
+// source. A value the rules do not allow goes to note, positioned at the value,
+// or at its '.' when the fraction is at fault: a fraction follows only six
+// digits and is exactly three (spec §8).
+func parseTimeval(s string, allowEnd bool, at int, note func(error)) (ms int, unit int) {
+	head, frac, hasFrac := strings.Cut(s, ".")
+	s = head
+	if hasFrac && (len(s) != 6 || len(frac) != 3 || !allDigits(frac)) {
+		note(errAt(at+len(s), "milliseconds follow only a 6-digit hhmmss time value"))
+		frac = ""
 	}
-	if !allDigits(s) {
-		return 0, 0, errAt(at, "malformed time value")
-	}
-
 	if allowEnd && s == "2400" && frac == "" {
-		return 86400000, 0, nil
+		return 86400000, 0
 	}
 
 	switch len(s) {
 	case 2: // HH
 		hh := digitsValue(s)
 		if hh > 23 {
-			return 0, 0, errAt(at, "hour out of range in time value")
+			note(errAt(at, "hour out of range in time value"))
 		}
-		return hh * 3600000, 3600000, nil
+		return hh * 3600000, 3600000
 	case 4: // HHMM
 		hh, mm := digitsValue(s[0:2]), digitsValue(s[2:4])
 		if hh > 23 {
-			return 0, 0, errAt(at, "hour out of range in time value")
+			note(errAt(at, "hour out of range in time value"))
 		}
 		if mm > 59 {
-			return 0, 0, errAt(at, "minute out of range in time value")
+			note(errAt(at, "minute out of range in time value"))
 		}
-		return hh*3600000 + mm*60000, 60000, nil
+		return hh*3600000 + mm*60000, 60000
 	case 6: // HHMMSS[.sss]
 		hh, mm, ssv := digitsValue(s[0:2]), digitsValue(s[2:4]), digitsValue(s[4:6])
 		if hh > 23 {
-			return 0, 0, errAt(at, "hour out of range in time value")
+			note(errAt(at, "hour out of range in time value"))
 		}
 		if mm > 59 {
-			return 0, 0, errAt(at, "minute out of range in time value")
+			note(errAt(at, "minute out of range in time value"))
 		}
 		if ssv > 59 {
-			return 0, 0, errAt(at, "second out of range in time value")
+			note(errAt(at, "second out of range in time value"))
 		}
 		base := hh*3600000 + mm*60000 + ssv*1000
 		if frac != "" {
-			return base + digitsValue(frac), 1, nil
+			return base + digitsValue(frac), 1
 		}
-		return base, 1000, nil
+		return base, 1000
 	}
-	return 0, 0, errAt(at, "malformed time value %q", s)
+	note(errAt(at, "malformed time value %q", s))
+	return 0, 0
 }
 
-// integerAt parses s, the token at offset at, as an integer; what names the
-// token in the error for a malformed one. An integer above maxInteger is an
-// error at the same offset.
-func integerAt(s string, at int, what string) (int, error) {
-	v, ok, over := parseInteger(s)
-	if over {
-		return 0, errAt(at, "integer above %d", maxInteger)
-	}
-	if !ok {
-		return 0, errAt(at, "invalid %s %q", what, s)
-	}
-	return v, nil
-}
-
+// allDigits reports whether every character of s is an ASCII digit.
 func allDigits(s string) bool {
-	if s == "" {
-		return false
-	}
 	for i := 0; i < len(s); i++ {
 		if !isDigit(s[i]) {
 			return false

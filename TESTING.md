@@ -34,7 +34,9 @@ A handful of statements are defensive defaults unreachable through `Parse`/`Cove
 
 Latest full run (2026-10-21, draft 3: error positions, the integer limit, the zone-name list, value-set lint narrowing), with `zones.go` rerun on its own after its last test was added: **520 mutants: 497 killed, 9 survivors (all equivalent, justified below), 7 reported "not covered" (tool blind spots, manually verified killed), 7 timeouts counted as killed**. Efficacy as reported by gremlins (which counts the 9 equivalents as lived): 98.22%; unjustified survivors: **0**.
 
-### Justified Equivalent Survivors (9)
+Rerun of `parse.go` and `parse_value.go` (2026-10-21, after the parser began reading on past a rule error so that the earliest error wins, and checking every token as it is read but for D's domain, which waits for the branch): **273 mutants: 251 killed, 1 timeout counted as killed, 2 lived, 19 not covered**. The two that lived are the parser equivalents below; three more lived on the first pass (a D exclusion's and a later D list item's offsets, and a D stride interval equal to its domain) and were killed by new tests. The nineteen not covered are the parser blind spots below, every one applied by hand and killed.
+
+### Justified Equivalent Survivors (8)
 
 gremlins has no inline suppression mechanism, so equivalents are documented here. (Three former rows are gone with their code: the `eval_time.go` occurrence-probe loop, removed when cadence arithmetic moved to exact int64 seconds; `compareLit`, removed when bounds began comparing the first span's start with the last span's end; and `singleValueOf`, removed when the lint began narrowing domains from every selector form.) Each is a mutant no test can distinguish because the mutated comparison only differs on inputs the parser/validator has already excluded, or on loop iterations that provably never match.
 
@@ -45,16 +47,22 @@ gremlins has no inline suppression mechanism, so equivalents are documented here
 | CONDITIONALS_BOUNDARY `eval_time.go:105` | `k <= est+2` → `<` | `estimateIndex` never underestimates the true occurrence index (calendar month/year diffs are ≥ elapsed complete periods; day/week division is exact in naive space), so `est+1`/`est+2` never match. Verified empirically as above. |
 | CONDITIONALS_BOUNDARY `eval_time.go:183` | `td > dim` → `>=` | When `td == dim` the clamp assigns `td = dim`, a no-op; identical result. |
 | CONDITIONALS_BOUNDARY `eval_time.go:191` (×2) | `a < 0` → `<=`, `b < 0` → `<=` | `a == 0` makes `a%b != 0` false first, short-circuiting identically; `b == 0` would already have panicked at `a / b` (and `b` is always 12 in this package). |
-| CONDITIONALS_BOUNDARY `parse_value.go:155` | `start.val >= 0` → `> 0` | `start.val == 0` (H/m/s only) can never form a wrap: wrap needs `rs > re` with `re >= 0`, impossible from 0; Y rejects 0 at parse, so the Y-backwards check is unaffected too. |
-| CONDITIONALS_BOUNDARY `parse_value.go:254` | `start.val >= 0` → `> 0` | Same shape in the stride wrap check: with `start.val == 0` the guarded `start.val > end.val` is false anyway (`end.val >= 0` required by the same clause). |
-| CONDITIONALS_BOUNDARY `parse_value.go:343` | `startMs > endMs` → `>=` | Equal T-range endpoints are rejected two lines earlier ("covers nothing"), so equality is unreachable. |
+| CONDITIONALS_BOUNDARY `parse_value.go:116` | `start.val >= 0` → `> 0` | `start.val == 0` (H/m/s only) can never form a wrap: wrap needs `rs > re` with `re >= 0`, impossible from 0, so the term's `wrapEligible` flag never changes what it covers. |
+| CONDITIONALS_BOUNDARY `parse_value.go:234` | `startMs > endMs` → `>=` | Equal T-range endpoints are an error two lines earlier ("covers nothing"), and the branch ends with it, so a range built from them is never evaluated. |
 
-### "Not Covered" Mutants (7) — Tool Blind Spots, Manually Verified Killed
+### "Not Covered" Mutants (21) — Tool Blind Spots, Manually Verified Killed
 
-gremlins only mutates positions present in the coverage profile; `switch`/`case` condition expressions and `const` declarations never appear there, so it refuses to run these seven even though the code is exercised. Each was applied by hand and the suite failed (killed):
+gremlins only mutates positions present in the coverage profile; `switch`/`case` condition expressions and `const` declarations never appear there, so it refuses to run these twenty-one even though the code is exercised. Each was applied by hand and the suite failed (killed):
 
-- `parse.go:67` `case c == '*'` negation: killed (every selector expression misroutes).
-- `parse.go:216` `maxInteger = 1<<31 - 1` (both INVERT_NEGATIVES and ARITHMETIC_BASE): killed (the limit moves off 2,147,483,647, and the `E7#2147483648`, `Y1:*/2147483648` and `20200101/2147483648D` vectors parse).
-- `parse.go:285` `case … sc.peek() == '/'` negation: killed (cadences misparse).
-- `parse.go:288` `case … sc.peek() == ':'` negation: killed (bounds misparse).
+- `parse.go:74` `case c == '*'` negation: killed (every bounds component misroutes).
+- `parse.go:78` `case c == '!'` negation: killed (a misplaced `!` loses its message, and every other unexpected character gains it).
+- `parse.go:266` `case items > 1 || first.isRange` negation and boundary: killed (`E1,2#1` reaches the ordinal, and every ordinal is rejected).
+- `parse.go:268` `case des != desE` negation: killed (`M1#2` is accepted as far as the ordinal, and `E5#5` rejected).
+- `parse.go:281` `case items > 1` negation and boundary: killed (`M1,2/2` reaches the stride, and every single-value stride is rejected as a list).
+- `parse.go:376` `case first.start.val < 0` negation and boundary: killed (`D-3/2` strides, and `H0/4` is rejected).
+- `parse.go:378` the stride wrap case, five mutants (`des != desY` negated, `first.end.val >= 0` negated and narrowed to `> 0`, `first.start.val > first.end.val` negated and widened to `>=`): killed (`M10:2/2` and `H5:0/2` stride a wrap, or `M3:3/2` and `M1:5/2` are rejected).
+- `parse.go:486` `maxInteger = 1<<31 - 1` (both INVERT_NEGATIVES and ARITHMETIC_BASE): killed (the limit moves off 2,147,483,647, and the `E7#2147483648`, `Y1:*/2147483648` and `20200101/2147483648D` vectors parse).
+- `parse.go:560` `case … sc.peek() == '/'` negation: killed (cadences misparse).
+- `parse.go:563` `case … sc.peek() == ':'` negation: killed (bounds misparse).
+- `parse_value.go:60` `case vp[0] == '!'` negation: killed (every list is built as an exclusion).
 - `eval.go:130` `minInt = -(1 << 62)` sign flip (both INVERT_NEGATIVES and ARITHMETIC_BASE): killed (`Y*:2024` open ranges stop matching); the sibling `maxInt` flip is killed too.
