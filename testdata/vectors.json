@@ -1201,6 +1201,27 @@
         "2024-03-31T01:00:00Z": true,
         "2024-03-31T01:29:59Z": true
       }
+    },
+    {
+      "id": "cadence-same-unit-exact",
+      "expression": "20200101/11M/10M",
+      "tz": "UTC",
+      "cases": {
+        "2020-01-15T12:00:00Z": true,
+        "2020-10-31T12:00:00Z": true,
+        "2020-11-15T12:00:00Z": false,
+        "2020-12-15T12:00:00Z": true
+      }
+    },
+    {
+      "id": "cadence-same-unit-exact-years",
+      "expression": "20200101/366Y/365Y",
+      "tz": "UTC",
+      "cases": {
+        "2020-06-01T00:00:00Z": true,
+        "2384-06-01T00:00:00Z": true,
+        "2385-06-01T00:00:00Z": false
+      }
     }
   ],
   "invalid": [
@@ -1598,6 +1619,11 @@
       "expression": "Y1:*/2147483648",
       "reason": "an integer is at most 2147483647, even where Y strides have no interval ceiling",
       "position": 5
+    },
+    {
+      "expression": "20200101/1Y/12M",
+      "reason": "different units compare conservatively: 12 months may reach 372 days, a year may be 365",
+      "position": 12
     }
   ],
   "warnings": [
