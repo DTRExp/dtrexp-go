@@ -1868,6 +1868,21 @@
       "expression": "D40 T090",
       "reason": "a malformed time value is a rule error; D40 is earlier",
       "position": 1
+    },
+    {
+      "expression": "D40,*",
+      "reason": "a bare '*' in a list is a rule error, so at the branch's end D40 is earlier",
+      "position": 1
+    },
+    {
+      "expression": "D40 20200101:",
+      "reason": "bounds need their end date — the end of the input",
+      "position": 13
+    },
+    {
+      "expression": "D40 *:",
+      "reason": "bounds need a date after '*:' — the end of the input",
+      "position": 6
     }
   ],
   "warnings": [

@@ -245,7 +245,8 @@ func (sc *scanner) readSelectorValue(des designator) (string, error) {
 		// a bare '*' is the whole domain on its own, never a list item or an
 		// exclusion's value; '*:*' is a range and may stand in either (spec §3)
 		if bare && (exclude || items > 1) {
-			return "", errAt(itemPos, "bare %q is not a list item — write the designator with %q for the whole domain", "*", "*")
+			// a rule error at the '*': the branch reads on, so a waiting D check still competes
+			sc.note(errAt(itemPos, "bare %q is not a list item — write the designator with %q for the whole domain", "*", "*"))
 		}
 		if sc.eof() || sc.peek() != ',' {
 			break

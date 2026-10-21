@@ -56,11 +56,11 @@ gremlins only mutates positions present in the coverage profile; `switch`/`case`
 
 - `parse.go:74` `case c == '*'` negation: killed (every bounds component misroutes).
 - `parse.go:78` `case c == '!'` negation: killed (a misplaced `!` loses its message, and every other unexpected character gains it).
-- `parse.go:266` `case items > 1 || first.isRange` negation and boundary: killed (`E1,2#1` reaches the ordinal, and every ordinal is rejected).
-- `parse.go:268` `case des != desE` negation: killed (`M1#2` is accepted as far as the ordinal, and `E5#5` rejected).
-- `parse.go:281` `case items > 1` negation and boundary: killed (`M1,2/2` reaches the stride, and every single-value stride is rejected as a list).
-- `parse.go:376` `case first.start.val < 0` negation and boundary: killed (`D-3/2` strides, and `H0/4` is rejected).
-- `parse.go:378` the stride wrap case, five mutants (`des != desY` negated, `first.end.val >= 0` negated and narrowed to `> 0`, `first.start.val > first.end.val` negated and widened to `>=`): killed (`M10:2/2` and `H5:0/2` stride a wrap, or `M3:3/2` and `M1:5/2` are rejected).
+- `parse.go:267` `case items > 1 || first.isRange` negation and boundary: killed (`E1,2#1` reaches the ordinal, and every ordinal is rejected).
+- `parse.go:269` `case des != desE` negation: killed (`M1#2` is accepted as far as the ordinal, and `E5#5` rejected).
+- `parse.go:282` `case items > 1` negation and boundary: killed (`M1,2/2` reaches the stride, and every single-value stride is rejected as a list).
+- `parse.go:377` `case first.start.val < 0` negation and boundary: killed (`D-3/2` strides, and `H0/4` is rejected).
+- `parse.go:379` the stride wrap case, five mutants (`des != desY` negated, `first.end.val >= 0` negated and narrowed to `> 0`, `first.start.val > first.end.val` negated and widened to `>=`): killed (`M10:2/2` and `H5:0/2` stride a wrap, or `M3:3/2` and `M1:5/2` are rejected).
 - `parse.go:486` `maxInteger = 1<<31 - 1` (both INVERT_NEGATIVES and ARITHMETIC_BASE): killed (the limit moves off 2,147,483,647, and the `E7#2147483648`, `Y1:*/2147483648` and `20200101/2147483648D` vectors parse).
 - `parse.go:560` `case … sc.peek() == '/'` negation: killed (cadences misparse).
 - `parse.go:563` `case … sc.peek() == ':'` negation: killed (bounds misparse).
