@@ -61,8 +61,8 @@ gremlins only mutates positions present in the coverage profile; `switch`/`case`
 - `parse.go:282` `case items > 1` negation and boundary: killed (`M1,2/2` reaches the stride, and every single-value stride is rejected as a list).
 - `parse.go:377` `case first.start.val < 0` negation and boundary: killed (`D-3/2` strides, and `H0/4` is rejected).
 - `parse.go:379` the stride wrap case, five mutants (`des != desY` negated, `first.end.val >= 0` negated and narrowed to `> 0`, `first.start.val > first.end.val` negated and widened to `>=`): killed (`M10:2/2` and `H5:0/2` stride a wrap, or `M3:3/2` and `M1:5/2` are rejected).
-- `parse.go:486` `maxInteger = 1<<31 - 1` (both INVERT_NEGATIVES and ARITHMETIC_BASE): killed (the limit moves off 2,147,483,647, and the `E7#2147483648`, `Y1:*/2147483648` and `20200101/2147483648D` vectors parse).
-- `parse.go:560` `case … sc.peek() == '/'` negation: killed (cadences misparse).
-- `parse.go:563` `case … sc.peek() == ':'` negation: killed (bounds misparse).
+- `parse.go:487` `maxInteger = 1<<31 - 1` (both INVERT_NEGATIVES and ARITHMETIC_BASE): killed (the limit moves off 2,147,483,647, and the `E7#2147483648`, `Y1:*/2147483648` and `20200101/2147483648D` vectors parse).
+- `parse.go:561` `case … sc.peek() == '/'` negation: killed (cadences misparse).
+- `parse.go:564` `case … sc.peek() == ':'` negation: killed (bounds misparse).
 - `parse_value.go:60` `case vp[0] == '!'` negation: killed (every list is built as an exclusion).
 - `eval.go:130` `minInt = -(1 << 62)` sign flip (both INVERT_NEGATIVES and ARITHMETIC_BASE): killed (`Y*:2024` open ranges stop matching); the sibling `maxInt` flip is killed too.
